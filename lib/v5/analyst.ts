@@ -1,5 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
-import { loadCharts } from "./charts";
+import { loadChartSet } from "./charts";
+import { formatPrice, type Spot } from "./market_data";
 import {
   TFS,
   breakdownTotal,
@@ -46,6 +47,8 @@ export type AnalysisOutcome = {
   analysis: Analysis;
   mock: boolean;
   charts: number;
+  live: boolean;
+  spot: Spot | null;
   note?: string;
 };
 
@@ -168,23 +171,26 @@ export async function analysePair(
   pair: Pair,
   now = new Date()
 ): Promise<AnalysisOutcome> {
-  const charts = await loadCharts(pair);
+  const set = await loadChartSet(pair);
+  const charts = set.charts;
   const apiKey = process.env.ANTHROPIC_API_KEY;
+
+  const base = { charts: charts.length, live: set.live, spot: set.spot };
 
   if (!apiKey) {
     return {
+      ...base,
       analysis: mockAnalysis(pair, now),
       mock: true,
-      charts: charts.length,
       note: "ANTHROPIC_API_KEY not set — returning mock analysis",
     };
   }
   if (charts.length === 0) {
     return {
+      ...base,
       analysis: mockAnalysis(pair, now),
       mock: true,
-      charts: 0,
-      note: "no chart images in public/charts/latest — run scripts/mt5_factory.py",
+      note: "no candles from any feed and no cached chart images",
     };
   }
 
@@ -194,7 +200,16 @@ export async function analysePair(
     const content: Anthropic.ContentBlockParam[] = [
       {
         type: "text",
-        text: `Pair: ${pair}. Images follow in order: ${TFS.join(", ")}. Current UTC time: ${now.toISOString()}. Return JSON only.`,
+        text: [
+          `Pair: ${pair}.`,
+          set.spot
+            ? `Current live price: ${pair} ${formatPrice(pair, set.spot.price)} (${set.spot.source}). Use THIS price for SL/TP calculation — do not read entry levels off the chart axis.`
+            : `Live price unavailable — derive levels from the most recent candle close shown on the charts.`,
+          `Candle source: ${set.source}.`,
+          `Images follow in order: ${TFS.join(", ")}.`,
+          `Current UTC time: ${now.toISOString()}.`,
+          `Return JSON only.`,
+        ].join(" "),
       },
       ...charts.map(
         (c): Anthropic.ContentBlockParam => ({
@@ -218,9 +233,9 @@ export async function analysePair(
 
     if (res.stop_reason === "refusal") {
       return {
+        ...base,
         analysis: mockAnalysis(pair, now),
         mock: true,
-        charts: charts.length,
         note: `model declined (${res.stop_details?.category ?? "unknown"}) — using mock`,
       };
     }
@@ -232,17 +247,17 @@ export async function analysePair(
 
     if (!text.trim()) {
       return {
+        ...base,
         analysis: mockAnalysis(pair, now),
         mock: true,
-        charts: charts.length,
         note: `empty response (stop_reason: ${res.stop_reason}) — using mock`,
       };
     }
 
     return {
+      ...base,
       analysis: coerceAnalysis(extractJson(text), pair, now),
       mock: false,
-      charts: charts.length,
     };
   } catch (err) {
     const message =
@@ -251,9 +266,9 @@ export async function analysePair(
         : (err as Error).message;
     console.error(`[v5/analyst] ${pair} Claude call failed:`, message);
     return {
+      ...base,
       analysis: mockAnalysis(pair, now),
       mock: true,
-      charts: charts.length,
       note: `Claude call failed, using mock: ${message}`,
     };
   }

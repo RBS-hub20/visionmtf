@@ -18,7 +18,7 @@ import {
 } from "@/lib/v5/types";
 
 /**
- * VISION MTF V5.2 — analysis cron (anti-spam).
+ * VISION MTF V5.3 — analysis cron (anti-spam + live prices).
  *
  * Runs hourly (GitHub Actions; vercel.json keeps a daily Vercel Cron because
  * the Hobby plan rejects sub-daily schedules).
@@ -53,6 +53,8 @@ type Evaluated = {
   analysis: Analysis;
   mock: boolean;
   charts: number;
+  live: boolean;
+  spot: number | null;
   note?: string;
   tradable: boolean;
 };
@@ -67,12 +69,14 @@ async function handle(req: Request) {
   // ---- 1. analyse both pairs -------------------------------------------
   const evaluated: Evaluated[] = [];
   for (const pair of PAIRS as readonly Pair[]) {
-    const { analysis, mock, charts, note } = await analysePair(pair, now);
+    const { analysis, mock, charts, note, live, spot } = await analysePair(pair, now);
     evaluated.push({
       pair,
       analysis,
       mock,
       charts,
+      live,
+      spot: spot?.price ?? null,
       note,
       tradable:
         analysis.action !== "WAIT" && analysis.confidence >= SEND_THRESHOLD[pair],
@@ -104,7 +108,7 @@ async function handle(req: Request) {
       // ---- SIGNAL MODE — always fires, bypasses the chart budget ----
       mode = "SIGNAL";
       kind = "SIGNAL";
-      const res = await sendSignal(analysis, null, SEND_THRESHOLD[pair]);
+      const res = await sendSignal(analysis, e.spot, SEND_THRESHOLD[pair]);
       delivered = res.ok;
       detail = res;
     } else {
@@ -137,7 +141,7 @@ async function handle(req: Request) {
       ...analysis,
       id: `${pair}-${now.getTime()}`,
       ts: now.toISOString(),
-      price: null,
+      price: e.spot,
       kind,
       delivered,
       collage: null,
@@ -154,6 +158,8 @@ async function handle(req: Request) {
       delivered,
       detail,
       charts: e.charts,
+      liveCandles: e.live,
+      price: e.spot,
       mock: e.mock,
       ...(e.note ? { note: e.note } : {}),
     });
@@ -163,7 +169,7 @@ async function handle(req: Request) {
 
   return NextResponse.json({
     ok: true,
-    version: "5.2",
+    version: "5.3",
     model: VISION_MODEL,
     ranAt: now.toISOString(),
     mock: records.every((r) => r.mock),

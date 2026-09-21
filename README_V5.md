@@ -1,4 +1,4 @@
-# VISION MTF V5.2 — Vision AI Engine (Claude)
+# VISION MTF V5.3 — Vision AI Engine (Claude + live market data)
 
 An **add-only** layer on top of the V4 landing page. The landing page design is
 unchanged; only two hrefs now point at the new `/live` tab.
@@ -69,6 +69,8 @@ lib/v5/store.ts               signals.json read/write
 lib/v5/charts.ts              chart loading + sharp collage
 lib/v5/analyst.ts             Claude Vision call, prompt, mock fallback
 lib/v5/chart_budget.ts        10-a-day chart-post rate limiter
+lib/v5/market_data.ts         live candles + spot (Binance / Yahoo / gold-api)
+lib/v5/render.ts              SVG candlestick renderer -> PNG via sharp
 
 data/signals.json             signal history (seed)
 vercel.json                   cron schedule
@@ -103,7 +105,46 @@ analysis. No Telegram credentials → sends are skipped, not failed. No charts �
 the model is told, and mock output is returned. The route always returns 200
 with valid JSON.
 
-### 2. Generate charts
+## V5.3 live market data
+
+Charts are rendered **server-side from live feeds on every request** — the
+committed PNGs in `public/charts/latest/` are now only a last-resort fallback.
+
+| Pair | Candles | Live price |
+|---|---|---|
+| **BTCUSD** | Binance `BTCUSDT` klines — `1w/1d/4h/1h/15m` all native | Binance ticker |
+| **XAUUSD** | Yahoo Finance **COMEX `GC=F`** — `1wk/1d/1h/15m` native, **4H aggregated from 1h** | `gold-api.com` XAU/USD **spot** |
+
+No API keys needed. Set `TWELVEDATA_API_KEY` to use true XAU/USD spot OHLC
+instead of gold futures.
+
+**Why two sources for gold:** Yahoo has no `XAUUSD=X` series, and TwelveData's
+`demo` key returns 401. `GC=F` is COMEX gold futures, which trades at a small
+premium to spot (~$30 at time of writing). The collage banner shows true spot
+and labels the candle source explicitly, so the gap is visible rather than
+hidden.
+
+Each collage carries a live banner:
+
+```
+● XAUUSD LIVE: $4,352.20                              VISION MTF V5
+  2026-09-21 12:08 Dubai · candles: COMEX GC=F · spot: gold-api XAU/USD spot
+```
+
+The live price is also injected into the Claude prompt, so SL/TP are computed
+off the current level instead of read off a stale chart axis:
+
+> Current live price: XAUUSD $4,352.20 (gold-api XAU/USD spot). Use THIS price
+> for SL/TP calculation — do not read entry levels off the chart axis.
+
+Per-timeframe response caching (5 min on 15M up to 3h on Weekly) keeps the
+upstream calls modest. A failed fetch falls back to the last cached value, then
+to the disk PNGs, which the banner then labels `CACHED MOCK CANDLES`.
+
+Rendering is `lib/v5/render.ts` — hand-built SVG rasterised by sharp. No
+headless browser, no chart library.
+
+### 2. Generate charts (fallback only)
 
 ```bash
 pip install -r scripts/requirements.txt
