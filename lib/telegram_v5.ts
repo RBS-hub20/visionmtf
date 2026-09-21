@@ -258,11 +258,13 @@ export function riskReward(
 export async function sendSignal(
   a: Analysis,
   price: number | null,
-  threshold: number
+  threshold: number,
+  options?: { prefix?: string }
 ): Promise<SendResult> {
+  const prefix = options?.prefix ?? "";
   return broadcast(a.pair, `${a.action} ${a.pair} \u2014 ${a.confidence}/100`, {
-    public: signalText(a, price, threshold),
-    vip: vipSignalText(a, price, threshold),
+    public: prefix + signalText(a, price, threshold),
+    vip: prefix + vipSignalText(a, price, threshold),
   });
 }
 
