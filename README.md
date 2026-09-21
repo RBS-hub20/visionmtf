@@ -5,6 +5,16 @@
 Production one-page marketing site for VISION MTF. Dark-mode only, built to sit
 somewhere between a prop firm and an AI SaaS product page.
 
+**Live:** <https://visionmtf.vercel.app> · **Repo:** <https://github.com/RBS-hub20/visionmtf>
+
+> ### ⚡ Currently in FREE BETA
+>
+> Every call-to-action routes to the private Telegram channel instead of Stripe,
+> prices render struck through with "FREE during beta", and no card is collected.
+>
+> The whole treatment is driven by one switch — `beta` in [`lib/site.ts`](lib/site.ts).
+> Set `beta.active = false` to restore paid Stripe checkout everywhere at once.
+
 ---
 
 ## Quick start
@@ -139,10 +149,21 @@ Useful classes: `.glass`, `.card`, `.btn-neon`, `.btn-ghost`, `.chip`,
 
 ## Deploying
 
-Push to a Git repo and import it on Vercel — no configuration needed. Add the
-`NEXT_PUBLIC_*` variables in the project's environment settings, and set
-`NEXT_PUBLIC_SITE_URL` to the live domain so OG tags and the sitemap resolve
-correctly.
+Hosted on Vercel as project `visionmtf`, connected to this repo's `main` branch:
+**every push to `main` deploys to production automatically.**
+
+Manual deploy, if needed:
+
+```bash
+npx vercel --prod --yes
+```
+
+`NEXT_PUBLIC_*` values are **inlined at build time**, not read at runtime —
+changing one in the Vercel dashboard does nothing until the next build. After
+editing an env var, trigger a redeploy.
+
+When `visionmtf.com` goes live, update `NEXT_PUBLIC_SITE_URL` and rebuild, or
+the OG tags and sitemap will keep pointing at the Vercel domain.
 
 ---
 
