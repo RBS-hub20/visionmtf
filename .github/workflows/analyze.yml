@@ -1,0 +1,39 @@
+# VISION MTF V5 — 30-minute analysis trigger.
+#
+# Vercel's Hobby plan caps cron jobs at once per day, and a sub-daily schedule
+# in vercel.json makes the whole DEPLOYMENT fail. So vercel.json runs daily and
+# this workflow provides the real 30-minute cadence for free.
+#
+# If you upgrade to Vercel Pro: set vercel.json to "*/30 * * * *" and disable
+# this workflow (Actions tab -> Analyze -> Disable workflow).
+#
+# Optional repo secrets (Settings -> Secrets and variables -> Actions):
+#   ANALYZE_URL   override the endpoint (default: the production alias)
+#   CRON_SECRET   must match the CRON_SECRET env var set in Vercel
+
+name: Analyze
+
+on:
+  schedule:
+    - cron: "*/30 * * * *"
+  workflow_dispatch:
+
+jobs:
+  trigger:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Call /api/cron/analyze
+        env:
+          ANALYZE_URL: ${{ secrets.ANALYZE_URL || 'https://visionmtf.vercel.app/api/cron/analyze' }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          echo "POST $ANALYZE_URL"
+          code=$(curl -sS -o /tmp/out.json -w '%{http_code}' \
+            --max-time 120 \
+            ${CRON_SECRET:+-H "Authorization: Bearer $CRON_SECRET"} \
+            "$ANALYZE_URL")
+          echo "HTTP $code"
+          cat /tmp/out.json | head -c 4000
+          echo
+          test "$code" = "200"

@@ -135,12 +135,33 @@ The same applies to charts: `scripts/mt5_factory.py` cannot run on Vercel and
 cannot write into a deployment. Charts must be generated somewhere with MT5
 (a Windows box or VPS) and **committed**, or uploaded to blob storage.
 
-### Cron frequency needs a paid plan
+### Cron frequency on the Hobby plan
 
-`vercel.json` requests `*/30 * * * *`. **Vercel's Hobby plan only runs cron jobs
-once per day** — the deployment succeeds but the schedule is throttled. Pro is
-required for true 30-minute execution. Until then, trigger manually or drive it
-from an external scheduler hitting `/api/cron/analyze`.
+Vercel's Hobby plan caps cron jobs at **once per day**, and a sub-daily schedule
+in `vercel.json` does not just get throttled — it makes the **entire deployment
+fail**:
+
+```
+Hobby accounts are limited to daily cron jobs. This cron expression
+(*/30 * * * *) would run more than once per day.
+```
+
+So the setup is split:
+
+| | Schedule | Where |
+|---|---|---|
+| Vercel Cron | `0 9 * * *` (daily) | `vercel.json` |
+| **Real 30-min cadence** | `*/30 * * * *` | `.github/workflows/analyze.yml` |
+
+The GitHub Actions workflow calls `/api/cron/analyze` every 30 minutes for free.
+Optional repo secrets: `ANALYZE_URL` (defaults to the production alias) and
+`CRON_SECRET` (must match the Vercel env var).
+
+**On Vercel Pro**, set `vercel.json` to `*/30 * * * *` and disable the workflow
+(Actions → Analyze → Disable workflow).
+
+Note: GitHub's scheduled runs are best-effort and can be delayed during peak
+load, and Actions schedules are suspended after 60 days of repo inactivity.
 
 ---
 
