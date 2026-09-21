@@ -16,7 +16,8 @@ import type { Pair } from "./types";
  */
 
 export const CHART_POST_INTERVAL_MS = 8_640_000; // 2.4h => 10 posts / 24h
-export const MIN_CHART_CONFIDENCE = 60; // below this the setup is not worth posting
+// TEMP TEST: lowered 60 -> 50 to widen the chart-post window. REVERT TO 60.
+export const MIN_CHART_CONFIDENCE = 50; // below this the setup is not worth posting
 
 const isServerless = Boolean(process.env.VERCEL);
 const FILE = isServerless
