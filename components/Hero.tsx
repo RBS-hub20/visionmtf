@@ -84,7 +84,7 @@ export function Hero() {
                 {beta.active ? beta.cta : "Get Private Access — $79/mo"}
                 <ArrowUpRight className="h-4 w-4 shrink-0" strokeWidth={2.5} />
               </Link>
-              <Link href="#live-status" className="btn-ghost min-h-[3rem] px-6 py-2.5 text-[0.95rem]">
+              <Link href="/live" className="btn-ghost min-h-[3rem] px-6 py-2.5 text-[0.95rem]">
                 <LineChart className="h-4 w-4 text-neon" strokeWidth={2.2} />
                 View Live Track Record
               </Link>

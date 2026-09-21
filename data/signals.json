@@ -1,0 +1,58 @@
+{
+  "version": 5,
+  "updatedAt": "2026-09-21T06:43:16.150Z",
+  "lastWaitUpdateAt": {
+    "XAUUSD": "2026-09-21T06:43:16.033Z",
+    "BTCUSD": "2026-09-21T06:43:16.033Z"
+  },
+  "signals": [
+    {
+      "pair": "XAUUSD",
+      "action": "WAIT",
+      "confidence": 68,
+      "score_breakdown": {
+        "W": 22,
+        "D": 21,
+        "4H": 14,
+        "H1": 7,
+        "15M": 4
+      },
+      "reason_taglish": "Aligned pa rin ang Weekly at Daily sa bullish, pero nasa Premium pa ang price kaya hindi pa tayo papasok. Hinihintay natin ang tap sa 4H discount OB bago mag-execute sa 15M BOS.",
+      "session": "Asian",
+      "sl": null,
+      "tp1": null,
+      "tp2": null,
+      "id": "XAUUSD-1789972996033",
+      "ts": "2026-09-21T06:43:16.033Z",
+      "price": null,
+      "kind": "WAIT_UPDATE",
+      "delivered": false,
+      "collage": null,
+      "mock": true
+    },
+    {
+      "pair": "BTCUSD",
+      "action": "WAIT",
+      "confidence": 74,
+      "score_breakdown": {
+        "W": 23,
+        "D": 22,
+        "4H": 15,
+        "H1": 10,
+        "15M": 4
+      },
+      "reason_taglish": "Malinis ang Daily trend pero hindi pa nafi-fill ang 1H FVG kaya wala pang entry. Kailangan muna ng 15M break of structure bago i-arm ang trade.",
+      "session": "Asian",
+      "sl": null,
+      "tp1": null,
+      "tp2": null,
+      "id": "BTCUSD-1789972996033",
+      "ts": "2026-09-21T06:43:16.033Z",
+      "price": null,
+      "kind": "WAIT_UPDATE",
+      "delivered": false,
+      "collage": null,
+      "mock": true
+    }
+  ]
+}

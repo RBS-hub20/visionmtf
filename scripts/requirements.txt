@@ -1,0 +1,8 @@
+# VISION MTF V5 — chart factory
+# MetaTrader5 is Windows-only. On macOS/Linux the script still runs and
+# produces mock charts so the build and /live page work.
+MetaTrader5>=5.0.45 ; platform_system == "Windows"
+mplfinance>=0.12.10b0
+pandas>=2.0.0
+numpy>=1.24.0
+pillow>=10.0.0

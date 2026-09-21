@@ -31,7 +31,7 @@ export const beta = {
 export const nav = [
   { label: "Product", href: "#product" },
   { label: "How It Works", href: "#how-it-works" },
-  { label: "Live Status", href: "#live-status" },
+  { label: "Live Status", href: "/live" },
   { label: "Pricing", href: "#pricing" },
 ] as const;
 
