@@ -1,0 +1,208 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    color-scheme: dark;
+    --neon: #00ff88;
+    --line: #1f1f1f;
+  }
+
+  * {
+    @apply border-line;
+  }
+
+  html {
+    scroll-behavior: smooth;
+    scroll-padding-top: 90px;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  body {
+    @apply bg-ink text-white antialiased font-sans;
+    text-rendering: optimizeLegibility;
+  }
+
+  ::selection {
+    background: rgba(0, 255, 136, 0.28);
+    color: #ffffff;
+  }
+
+  /* Scrollbar — dark, thin, neon thumb */
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track {
+    background: #000;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: #1f1f1f;
+    border-radius: 999px;
+    border: 2px solid #000;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: #2f4a3c;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    html {
+      scroll-behavior: auto;
+    }
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.001ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.001ms !important;
+    }
+  }
+}
+
+@layer components {
+  /* ---------- Surfaces ---------- */
+  .card {
+    @apply relative rounded-2xl border border-line bg-card;
+  }
+
+  .glass {
+    @apply relative rounded-2xl border border-line;
+    background: linear-gradient(
+      180deg,
+      rgba(255, 255, 255, 0.045) 0%,
+      rgba(255, 255, 255, 0.012) 42%,
+      rgba(0, 0, 0, 0.35) 100%
+    );
+    backdrop-filter: blur(18px) saturate(140%);
+    -webkit-backdrop-filter: blur(18px) saturate(140%);
+    box-shadow:
+      inset 0 1px 0 0 rgba(255, 255, 255, 0.07),
+      0 30px 70px -40px rgba(0, 0, 0, 1);
+  }
+
+  /* Hairline gradient top edge used on premium cards */
+  .edge-top::before {
+    content: "";
+    @apply pointer-events-none absolute inset-x-0 top-0 h-px;
+    background: linear-gradient(
+      90deg,
+      transparent,
+      rgba(0, 255, 136, 0.55),
+      transparent
+    );
+  }
+
+  /* ---------- Type ---------- */
+  .text-silver-metal {
+    @apply bg-silver-text bg-clip-text text-transparent;
+  }
+
+  .text-neon-metal {
+    @apply bg-neon-text bg-clip-text text-transparent;
+  }
+
+  .eyebrow {
+    @apply text-2xs font-semibold uppercase tracking-ultra text-silver-dim;
+  }
+
+  .num {
+    @apply font-mono tabular-nums;
+  }
+
+  /* ---------- Buttons ---------- */
+  .btn {
+    @apply inline-flex select-none items-center justify-center gap-2 rounded-xl px-5 py-3 text-sm font-semibold
+           transition-all duration-200 focus-visible:outline-none focus-visible:ring-2
+           focus-visible:ring-neon/70 focus-visible:ring-offset-2 focus-visible:ring-offset-black;
+  }
+
+  .btn-neon {
+    @apply btn text-black;
+    background: linear-gradient(180deg, #5cffb9 0%, #00ff88 46%, #00cc6d 100%);
+    box-shadow:
+      0 0 0 1px rgba(0, 255, 136, 0.5),
+      0 10px 30px -10px rgba(0, 255, 136, 0.55),
+      inset 0 1px 0 0 rgba(255, 255, 255, 0.5);
+  }
+  .btn-neon:hover {
+    box-shadow:
+      0 0 0 1px rgba(0, 255, 136, 0.8),
+      0 14px 44px -8px rgba(0, 255, 136, 0.8),
+      inset 0 1px 0 0 rgba(255, 255, 255, 0.6);
+    transform: translateY(-1px);
+  }
+  .btn-neon:active {
+    transform: translateY(0);
+  }
+
+  .btn-ghost {
+    @apply btn border border-line-2 bg-white/[0.03] text-white hover:border-neon/45 hover:bg-white/[0.06];
+  }
+
+  .btn-silver {
+    @apply btn border border-line-2 text-silver hover:border-silver-dim hover:text-white;
+  }
+
+  /* ---------- Chips / pills ---------- */
+  .chip {
+    @apply inline-flex items-center gap-1.5 rounded-full border border-line bg-white/[0.03]
+           px-2.5 py-1 text-2xs font-medium text-silver;
+  }
+
+  .chip-neon {
+    @apply chip border-neon/30 bg-neon/[0.08] text-neon;
+  }
+
+  /* ---------- Backgrounds ---------- */
+  .grid-bg {
+    background-image:
+      linear-gradient(to right, rgba(255, 255, 255, 0.045) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(255, 255, 255, 0.045) 1px, transparent 1px);
+    background-size: 64px 64px;
+  }
+
+  .dot-bg {
+    background-image: radial-gradient(rgba(255, 255, 255, 0.09) 1px, transparent 1px);
+    background-size: 26px 26px;
+  }
+
+  .noise::after {
+    content: "";
+    @apply pointer-events-none absolute inset-0 opacity-[0.035] mix-blend-overlay;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E");
+  }
+
+  .mask-fade-b {
+    -webkit-mask-image: linear-gradient(to bottom, #000 55%, transparent 100%);
+    mask-image: linear-gradient(to bottom, #000 55%, transparent 100%);
+  }
+
+  .mask-fade-x {
+    -webkit-mask-image: linear-gradient(to right, transparent, #000 12%, #000 88%, transparent);
+    mask-image: linear-gradient(to right, transparent, #000 12%, #000 88%, transparent);
+  }
+
+  .divider {
+    @apply h-px w-full;
+    background: linear-gradient(90deg, transparent, #1f1f1f 18%, #1f1f1f 82%, transparent);
+  }
+
+  .glow-neon {
+    filter: drop-shadow(0 0 14px rgba(0, 255, 136, 0.5));
+  }
+}
+
+@layer utilities {
+  .section {
+    @apply relative py-20 sm:py-28 lg:py-36;
+  }
+
+  .balance {
+    text-wrap: balance;
+  }
+
+  .pretty {
+    text-wrap: pretty;
+  }
+}
