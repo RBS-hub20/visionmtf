@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { analysePair, VISION_MODEL } from "@/lib/v5/analyst";
 import { appendRows, readHistory, saveRows } from "@/lib/v5/store";
 import { getStats, settlePending } from "@/lib/v5/outcome_tracker";
+import { lastFailures } from "@/lib/v5/market_data";
 import { sendMarketWatch, sendSignal } from "@/lib/telegram_v5";
 import {
   MIN_CHART_CONFIDENCE,
@@ -171,6 +172,7 @@ async function handle(req: Request) {
       liveCandles: e.live,
       price: e.spot,
       mock: e.mock,
+      ...(e.live ? {} : { feedErrors: lastFailures(pair) }),
       ...(e.note ? { note: e.note } : {}),
     });
   }

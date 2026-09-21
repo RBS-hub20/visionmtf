@@ -39,6 +39,21 @@ const TTL_MS: Record<Tf, number> = {
 type Entry<T> = { value: T; at: number };
 const cache = new Map<string, Entry<unknown>>();
 
+/** Last fetch error per pair, surfaced by the cron route for diagnosis. */
+const failures = new Map<string, string>();
+
+function recordFailure(pair: Pair, tf: Tf, message: string) {
+  failures.set(`${pair}:${tf}`, message.slice(0, 200));
+}
+
+export function lastFailures(pair: Pair): string[] {
+  const out: string[] = [];
+  failures.forEach((msg, key) => {
+    if (key.startsWith(`${pair}:`)) out.push(`${key} ${msg}`);
+  });
+  return out;
+}
+
 async function cached<T>(key: string, ttl: number, load: () => Promise<T>): Promise<T | null> {
   const hit = cache.get(key) as Entry<T> | undefined;
   if (hit && Date.now() - hit.at < ttl) return hit.value;
@@ -47,7 +62,9 @@ async function cached<T>(key: string, ttl: number, load: () => Promise<T>): Prom
     cache.set(key, { value, at: Date.now() });
     return value;
   } catch (err) {
-    console.error(`[market_data] ${key} failed:`, (err as Error).message);
+    const message = (err as Error).message;
+    console.error(`[market_data] ${key} failed:`, message);
+    failures.set(key, message.slice(0, 200));
     return hit ? hit.value : null; // stale beats nothing
   }
 }
@@ -252,10 +269,17 @@ export async function fetchCandles(pair: Pair, tf: Tf): Promise<Candle[] | null>
   const td = process.env.TWELVEDATA_API_KEY;
   const key = `${pair}:${tf}:${pair === "XAUUSD" && td ? "td" : "def"}`;
   return cached(key, TTL_MS[tf], async () => {
-    if (pair === "XAUUSD" && td) return fetchTwelveData(tf, td);
-    // Binance first for BOTH pairs: Yahoo rate-limits datacenter IPs, so on
-    // Vercel it fails persistently. PAXG tracks spot to ~0.1%, far closer
-    // than COMEX GC=F futures, and has all five intervals natively.
+    if (pair === "XAUUSD" && td) {
+      try {
+        return await fetchTwelveData(tf, td);
+      } catch (err) {
+        // A bad or rate-limited key must NOT sink the whole chain.
+        recordFailure(pair, tf, `twelvedata: ${(err as Error).message}`);
+      }
+    }
+    // Binance for BOTH pairs: Yahoo rate-limits datacenter IPs, so on Vercel
+    // it fails persistently. PAXG tracks spot to ~0.1%, far closer than COMEX
+    // GC=F futures, and has all five intervals natively.
     return fetchBinance(pair, tf);
   });
 }
