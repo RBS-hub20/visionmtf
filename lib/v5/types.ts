@@ -107,3 +107,67 @@ export function sessionForDate(d: Date): Session {
   if (h >= 13 && h < 21) return "NY";
   return "Asian";
 }
+
+/* ------------------------------------------------------------------ */
+/*  V5.4 — community trust dashboard                                   */
+/* ------------------------------------------------------------------ */
+
+export type RowType = "WATCH" | "SIGNAL";
+export type TradeStatus = "PENDING" | "WIN" | "LOSS" | "BE";
+
+export type Outcome = {
+  /** Signed: positive means the trade went the right way. */
+  pips: number;
+  /** Same move expressed in quote currency. */
+  dollars: number;
+  /** Realised R multiple, reward-over-risk. */
+  r: number;
+  closePrice: number;
+  closedAt: string;
+  /** How the close was determined. */
+  via: "tp1" | "sl" | "manual";
+};
+
+/** One row of the public history feed. */
+export type TradeRecord = {
+  id: string;
+  timestamp: string;
+  pair: Pair;
+  type: RowType;
+  action: Action;
+  entry: number | null;
+  sl: number | null;
+  tp1: number | null;
+  tp2: number | null;
+  confidence: number;
+  session: Session;
+  score_breakdown: ScoreBreakdown;
+  reason_taglish: string;
+  chartUrl: string;
+  status: TradeStatus;
+  outcome: Outcome | null;
+  delivered: boolean;
+  mock: boolean;
+};
+
+export type HistoryFile = {
+  version: "5.4";
+  updatedAt: string | null;
+  rows: TradeRecord[];
+};
+
+export const EMPTY_HISTORY: HistoryFile = {
+  version: "5.4",
+  updatedAt: null,
+  rows: [],
+};
+
+/** Pip size per pair: XAU 0.1 = 1 pip, BTC $1 = 1 pip. */
+export const PIP_SIZE: Record<Pair, number> = {
+  XAUUSD: 0.1,
+  BTCUSD: 1,
+};
+
+export function toPips(pair: Pair, priceDiff: number): number {
+  return Math.round((priceDiff / PIP_SIZE[pair]) * 10) / 10;
+}

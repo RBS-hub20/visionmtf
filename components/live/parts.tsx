@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { TFS, TF_WEIGHT, type Action, type SignalRecord, type Tf } from "@/lib/v5/types";
+import { TFS, TF_WEIGHT, type Action, type Tf } from "@/lib/v5/types";
 import { cn } from "@/lib/utils";
 
 /* ------------------------------------------------------------------ */
@@ -127,91 +127,6 @@ export function ConfidenceBar({
       <div className={cn("num mt-2 text-2xl font-bold", tone.text)}>
         {confidence}
         <span className="text-sm text-silver-dim">/100</span>
-      </div>
-    </div>
-  );
-}
-
-/* ------------------------------------------------------------------ */
-/*  Signal history                                                     */
-/* ------------------------------------------------------------------ */
-
-function when(ts: string) {
-  const d = new Date(ts);
-  if (Number.isNaN(d.getTime())) return "—";
-  return d.toISOString().replace("T", " ").slice(0, 16) + "Z";
-}
-
-export function HistoryTable({ rows }: { rows: SignalRecord[] }) {
-  if (rows.length === 0) {
-    return (
-      <div className="card flex flex-col items-center gap-2 px-6 py-14 text-center">
-        <LiveDot tone="bg-warn" />
-        <p className="mt-1 text-sm font-medium text-white">No runs recorded yet</p>
-        <p className="max-w-sm text-2xs text-silver-dim">
-          The engine writes a row every 30 minutes. Trigger one now with{" "}
-          <code className="rounded bg-black px-1.5 py-0.5 text-neon">/api/cron/analyze</code>.
-        </p>
-      </div>
-    );
-  }
-
-  return (
-    <div className="card overflow-hidden">
-      <div className="overflow-x-auto">
-        <table className="w-full min-w-[720px] text-left">
-          <thead>
-            <tr className="border-b border-line bg-black/50">
-              {["Time (UTC)", "Pair", "Action", "Score", "W", "D", "4H", "H1", "15M", "Session", "Sent"].map(
-                (h) => (
-                  <th
-                    key={h}
-                    className="px-3 py-2.5 text-[0.6rem] font-semibold uppercase tracking-[0.14em] text-silver-deep"
-                  >
-                    {h}
-                  </th>
-                )
-              )}
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((r) => {
-              const tone = ACTION_TONE[r.action];
-              return (
-                <tr key={r.id} className="border-b border-line/60 last:border-0 hover:bg-white/[0.02]">
-                  <td className="num whitespace-nowrap px-3 py-2.5 text-2xs text-silver-dim">{when(r.ts)}</td>
-                  <td className="num px-3 py-2.5 text-2xs font-bold text-white">{r.pair}</td>
-                  <td className="px-3 py-2.5">
-                    <span
-                      className={cn(
-                        "inline-flex items-center gap-1.5 rounded-md border px-1.5 py-0.5 text-[0.6rem] font-bold",
-                        tone.border,
-                        tone.bg,
-                        tone.text
-                      )}
-                    >
-                      {r.action}
-                    </span>
-                  </td>
-                  <td className={cn("num px-3 py-2.5 text-2xs font-bold", tone.text)}>{r.confidence}</td>
-                  {TFS.map((tf) => (
-                    <td key={tf} className="num px-3 py-2.5 text-2xs text-silver">
-                      {r.score_breakdown[tf] ?? 0}
-                    </td>
-                  ))}
-                  <td className="px-3 py-2.5 text-2xs text-silver-dim">{r.session}</td>
-                  <td className="px-3 py-2.5 text-2xs">
-                    {r.delivered ? (
-                      <span className="text-neon">✓</span>
-                    ) : (
-                      <span className="text-silver-deep">—</span>
-                    )}
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
       </div>
     </div>
   );

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { analysePair, VISION_MODEL } from "@/lib/v5/analyst";
-import { appendSignals } from "@/lib/v5/store";
+import { appendRows, readHistory, saveRows } from "@/lib/v5/store";
+import { getStats, settlePending } from "@/lib/v5/outcome_tracker";
 import { sendMarketWatch, sendSignal } from "@/lib/telegram_v5";
 import {
   MIN_CHART_CONFIDENCE,
@@ -13,12 +14,11 @@ import {
   SEND_THRESHOLD,
   type Analysis,
   type Pair,
-  type SignalKind,
-  type SignalRecord,
+  type TradeRecord,
 } from "@/lib/v5/types";
 
 /**
- * VISION MTF V5.3 — analysis cron (anti-spam + live prices).
+ * VISION MTF V5.4 — analysis cron (anti-spam, live prices, outcome tracking).
  *
  * Runs hourly (GitHub Actions; vercel.json keeps a daily Vercel Cron because
  * the Hobby plan rejects sub-daily schedules).
@@ -84,8 +84,8 @@ async function handle(req: Request) {
   }
 
   // ---- 2. decide, then act ---------------------------------------------
-  // Read the budget once so both pairs are judged against the same snapshot.
-  const budget = await readBudget();
+  // Read the budget and history once so both pairs see the same snapshot.
+  const [budget, history] = await Promise.all([readBudget(), readHistory()]);
 
   // A pair only yields its turn if the other is genuinely a candidate,
   // otherwise one quiet pair would block the other indefinitely.
@@ -93,13 +93,12 @@ async function handle(req: Request) {
     (e) => !e.tradable && e.analysis.confidence >= MIN_CHART_CONFIDENCE
   );
 
-  const records: SignalRecord[] = [];
+  const records: TradeRecord[] = [];
   const report: Record<string, unknown>[] = [];
   let chartSlotTaken = false;
 
   for (const e of evaluated) {
     const { pair, analysis } = e;
-    let kind: SignalKind = "LOGGED";
     let delivered = false;
     let mode = "QUIET";
     let detail: unknown = { reason: "no-send" };
@@ -107,7 +106,6 @@ async function handle(req: Request) {
     if (e.tradable) {
       // ---- SIGNAL MODE — always fires, bypasses the chart budget ----
       mode = "SIGNAL";
-      kind = "SIGNAL";
       const res = await sendSignal(analysis, e.spot, SEND_THRESHOLD[pair]);
       delivered = res.ok;
       detail = res;
@@ -115,7 +113,7 @@ async function handle(req: Request) {
       // ---- CHART UPDATE MODE — budgeted ----
       const otherEligible = chartCandidates.some((c) => c.pair !== pair);
       const gate: ChartGate = chartSlotTaken
-        ? { allowed: false, reason: "not-this-pairs-turn", preferred: pair }
+        ? { allowed: false, reason: "slot-used-this-run" }
         : evaluateChartGate(
             pair,
             analysis.confidence,
@@ -126,7 +124,6 @@ async function handle(req: Request) {
 
       if (gate.allowed) {
         mode = "CHART_UPDATE";
-        kind = "WAIT_UPDATE";
         const res = await sendMarketWatch(analysis);
         delivered = res.ok;
         detail = res;
@@ -137,14 +134,27 @@ async function handle(req: Request) {
       }
     }
 
+    // Every run records a row — WATCH rows prove the engine is awake even
+    // when it has nothing to say.
+    const isSignal = e.tradable;
     records.push({
-      ...analysis,
       id: `${pair}-${now.getTime()}`,
-      ts: now.toISOString(),
-      price: e.spot,
-      kind,
+      timestamp: now.toISOString(),
+      pair,
+      type: isSignal ? "SIGNAL" : "WATCH",
+      action: analysis.action,
+      entry: isSignal ? (e.spot ?? null) : null,
+      sl: isSignal ? analysis.sl : null,
+      tp1: isSignal ? analysis.tp1 : null,
+      tp2: isSignal ? analysis.tp2 : null,
+      confidence: analysis.confidence,
+      session: analysis.session,
+      score_breakdown: analysis.score_breakdown,
+      reason_taglish: analysis.reason_taglish,
+      chartUrl: `/api/collage?pair=${pair}&t=${now.getTime()}`,
+      status: "PENDING",
+      outcome: null,
       delivered,
-      collage: null,
       mock: e.mock,
     });
 
@@ -154,7 +164,7 @@ async function handle(req: Request) {
       action: analysis.action,
       confidence: analysis.confidence,
       threshold: SEND_THRESHOLD[pair],
-      kind,
+      type: isSignal ? "SIGNAL" : "WATCH",
       delivered,
       detail,
       charts: e.charts,
@@ -165,11 +175,15 @@ async function handle(req: Request) {
     });
   }
 
-  const saved = await appendSignals(records, {});
+  // ---- 3. persist, then verify outstanding signals -------------------
+  const appended = await appendRows(records, history.rows);
+  const { rows, settled, checked } = await settlePending(appended.rows, 15, now);
+  const saved = settled > 0 ? await saveRows(rows) : appended;
+  const stats = getStats(saved.rows);
 
   return NextResponse.json({
     ok: true,
-    version: "5.3",
+    version: "5.4",
     model: VISION_MODEL,
     ranAt: now.toISOString(),
     mock: records.every((r) => r.mock),
@@ -179,8 +193,10 @@ async function handle(req: Request) {
       maxPerDay: 10,
       minConfidence: MIN_CHART_CONFIDENCE,
     },
+    outcomes: { checked, settled },
+    stats,
     results: report,
-    stored: saved.signals.length,
+    stored: saved.rows.length,
   });
 }
 

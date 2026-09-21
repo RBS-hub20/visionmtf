@@ -8,11 +8,12 @@ import {
   ACTION_TONE,
   BetaCta,
   ConfidenceBar,
-  HistoryTable,
   LiveDot,
   ScoreCards,
 } from "@/components/live/parts";
-import { readSignals } from "@/lib/v5/store";
+import { History } from "@/components/live/History";
+import { readHistory } from "@/lib/v5/store";
+import { getStats } from "@/lib/v5/outcome_tracker";
 import { chartFile } from "@/lib/v5/charts";
 import { mockAnalysis } from "@/lib/v5/analyst";
 import { site } from "@/lib/site";
@@ -21,7 +22,7 @@ import {
   SEND_THRESHOLD,
   type Action,
   type Pair,
-  type SignalRecord,
+  type TradeRecord,
 } from "@/lib/v5/types";
 import { cn } from "@/lib/utils";
 
@@ -44,8 +45,9 @@ async function hasCharts(pair: Pair) {
   }
 }
 
-function latestFor(signals: SignalRecord[], pair: Pair): SignalRecord | null {
-  return signals.find((s) => s.pair === pair) ?? null;
+/** Newest row for a pair — WATCH rows count, they carry the current read. */
+function latestFor(rows: TradeRecord[], pair: Pair): TradeRecord | null {
+  return rows.find((r) => r.pair === pair) ?? null;
 }
 
 /** Spec wording for the live banner: WAITING / BULLISH / BEARISH. */
@@ -75,18 +77,14 @@ async function PairPanel({
   charts,
 }: {
   pair: Pair;
-  record: SignalRecord | null;
+  record: TradeRecord | null;
   charts: boolean;
 }) {
   // Fall back to the deterministic sample so the panel is never empty.
+  const fallback = mockAnalysis(pair, new Date());
   const a = record ?? {
-    ...mockAnalysis(pair, new Date()),
-    id: `${pair}-placeholder`,
-    ts: new Date().toISOString(),
-    price: null,
-    kind: "LOGGED" as const,
-    delivered: false,
-    collage: null,
+    ...fallback,
+    timestamp: new Date().toISOString(),
     mock: true,
   };
   const tone = ACTION_TONE[a.action];
@@ -116,7 +114,7 @@ async function PairPanel({
           </div>
           <p className="mt-1.5 flex items-center gap-1.5 text-2xs text-silver-dim">
             <Clock className="h-3 w-3" strokeWidth={2.5} />
-            {a.session} session · updated {ago(a.ts)}
+            {a.session} session · updated {ago(a.timestamp)}
             {a.mock && <span className="chip ml-1 py-0 text-[0.55rem]">sample data</span>}
           </p>
         </div>
@@ -187,21 +185,19 @@ async function PairPanel({
 /* ------------------------------------------------------------------ */
 
 export default async function LivePage() {
-  const store = await readSignals();
+  const store = await readHistory();
+  const stats = getStats(store.rows);
   const pairs = PAIRS as readonly Pair[];
 
   const panels = await Promise.all(
     pairs.map(async (pair) => ({
       pair,
-      record: latestFor(store.signals, pair),
+      record: latestFor(store.rows, pair),
       charts: await hasCharts(pair),
     }))
   );
 
-  const headline = panels[0].record ?? {
-    ...mockAnalysis("XAUUSD", new Date()),
-    ts: new Date().toISOString(),
-  };
+  const headline = panels[0].record ?? mockAnalysis("XAUUSD", new Date());
   const headlineTone = ACTION_TONE[headline.action];
 
   return (
@@ -252,9 +248,9 @@ export default async function LivePage() {
             <span className="text-neon-metal">Status.</span>
           </h1>
           <p className="pretty mt-5 max-w-2xl text-base leading-relaxed text-silver-dim sm:text-lg">
-            Every 30 minutes the engine re-reads Weekly down to 15M on both markets and
-            scores the confluence out of 100. Below is the most recent run — including the
-            setups it decided <span className="font-medium text-warn">not</span> to take.
+            Every hour the engine re-reads Weekly down to 15M on both markets and scores
+            the confluence out of 100. Below is the most recent run — including the setups
+            it decided <span className="font-medium text-warn">not</span> to take.
           </p>
 
           <div className="mt-6 flex flex-wrap items-center gap-x-5 gap-y-2 text-2xs text-silver-dim">
@@ -268,7 +264,7 @@ export default async function LivePage() {
             </span>
             <span className="inline-flex items-center gap-1.5">
               <Clock className="h-3.5 w-3.5 text-neon" strokeWidth={2.2} />
-              WAIT update every 2h
+              Max 10 chart posts/day
             </span>
           </div>
         </section>
@@ -282,18 +278,21 @@ export default async function LivePage() {
 
         {/* ---- history ---- */}
         <section className="container mt-16 sm:mt-20">
-          <div className="mb-5 flex items-end justify-between gap-4">
+          <div className="mb-6 flex flex-wrap items-end justify-between gap-4">
             <div>
               <h2 className="text-2xl font-semibold tracking-tight text-white sm:text-3xl">
                 Signal history
               </h2>
               <p className="mt-1.5 text-sm text-silver-dim">
-                Last {Math.min(20, store.signals.length)} engine runs, newest first.
+                Every run recorded, outcomes verified automatically. Nothing hidden —
+                including the losers.
               </p>
             </div>
-            <span className="chip shrink-0">{store.signals.length} total</span>
+            <span className="chip shrink-0">
+              last {stats.sampleSize} closed · {stats.pending} open
+            </span>
           </div>
-          <HistoryTable rows={store.signals.slice(0, 20)} />
+          <History rows={store.rows} stats={stats} />
         </section>
 
         {/* ---- cta ---- */}

@@ -58,7 +58,9 @@ export type ChartGate =
   | { allowed: true; reason: "due" }
   | { allowed: false; reason: "cooling-down"; nextEligible: string; waitMs: number }
   | { allowed: false; reason: "low-confidence" }
-  | { allowed: false; reason: "not-this-pairs-turn"; preferred: Pair };
+  | { allowed: false; reason: "not-this-pairs-turn"; preferred: Pair }
+  /** The other pair already consumed this run's single slot. */
+  | { allowed: false; reason: "slot-used-this-run" };
 
 /**
  * Decide whether `pair` may take the next chart slot.
