@@ -10,6 +10,7 @@ import {
   type Spot,
 } from "./market_data";
 import { PANEL_H, PANEL_W, renderPanel } from "./render";
+import { ensureFonts, FONT_STACK } from "./fonts";
 import { TFS, TF_FILE, type Pair, type Tf } from "./types";
 
 /**
@@ -97,7 +98,7 @@ function labelSvg(text: string, accent: string) {
     `<svg width="${CELL_W}" height="${LABEL_H}" xmlns="http://www.w3.org/2000/svg">
        <rect width="${CELL_W}" height="${LABEL_H}" fill="#0A0A0A"/>
        <rect x="0" y="${LABEL_H - 2}" width="${CELL_W}" height="2" fill="${accent}"/>
-       <text x="14" y="23" font-family="Helvetica,Arial,sans-serif" font-size="17"
+       <text x="14" y="23" font-family="${FONT_STACK}" font-size="17"
              font-weight="bold" fill="${accent}" letter-spacing="2">${esc(text)}</text>
      </svg>`
   );
@@ -123,13 +124,13 @@ function bannerSvg(
        <rect width="${width}" height="${BANNER_H}" fill="#000000"/>
        <rect x="0" y="${BANNER_H - 2}" width="${width}" height="2" fill="#00FF88"/>
        <circle cx="26" cy="34" r="6" fill="${live ? "#00FF88" : "#FFB020"}"/>
-       <text x="44" y="42" font-family="Helvetica,Arial,sans-serif" font-size="34"
+       <text x="44" y="42" font-family="${FONT_STACK}" font-size="34"
              font-weight="bold" fill="#FFFFFF">${esc(priceText)}</text>
-       <text x="44" y="70" font-family="Helvetica,Arial,sans-serif" font-size="15"
+       <text x="44" y="70" font-family="${FONT_STACK}" font-size="15"
              fill="#8A8A8A">${esc(sub)}</text>
-       <text x="${width - 20}" y="42" text-anchor="end" font-family="Helvetica,Arial,sans-serif"
+       <text x="${width - 20}" y="42" text-anchor="end" font-family="${FONT_STACK}"
              font-size="20" font-weight="bold" fill="#00FF88">VISION MTF V5</text>
-       <text x="${width - 20}" y="70" text-anchor="end" font-family="Helvetica,Arial,sans-serif"
+       <text x="${width - 20}" y="70" text-anchor="end" font-family="${FONT_STACK}"
              font-size="15" fill="#C0C0C0">${esc(headline)}</text>
      </svg>`
   );
@@ -144,6 +145,7 @@ export async function buildCollage(
   headline: string,
   preloaded?: ChartSet
 ): Promise<Buffer | null> {
+  await ensureFonts();
   const set = preloaded ?? (await loadChartSet(pair));
   if (set.charts.length === 0) return null;
 

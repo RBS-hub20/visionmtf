@@ -1,4 +1,5 @@
 import sharp from "sharp";
+import { ensureFonts, FONT_STACK } from "./fonts";
 import type { Candle } from "./market_data";
 import type { Pair, Tf } from "./types";
 
@@ -88,7 +89,7 @@ export function candleChartSvg(
   for (const t of niceTicks(yMin, yMax)) {
     const py = y(t);
     parts.push(`<line x1="${PAD_L}" y1="${py.toFixed(1)}" x2="${W - PAD_R}" y2="${py.toFixed(1)}" stroke="${GRID}" stroke-width="1"/>`);
-    parts.push(`<text x="${W - PAD_R + 6}" y="${(py + 3.5).toFixed(1)}" font-family="Helvetica,Arial,sans-serif" font-size="11" fill="${DIM}">${fmtPrice(t)}</text>`);
+    parts.push(`<text x="${W - PAD_R + 6}" y="${(py + 3.5).toFixed(1)}" font-family="${FONT_STACK}" font-size="11" fill="${DIM}">${fmtPrice(t)}</text>`);
   }
 
   // candles
@@ -110,13 +111,13 @@ export function candleChartSvg(
   const ly = y(last);
   parts.push(`<line x1="${PAD_L}" y1="${ly.toFixed(1)}" x2="${W - PAD_R}" y2="${ly.toFixed(1)}" stroke="${TAG}" stroke-width="1" stroke-dasharray="4 4" opacity="0.85"/>`);
   parts.push(`<rect x="${W - PAD_R + 2}" y="${(ly - 9).toFixed(1)}" width="70" height="18" rx="3" fill="${TAG}"/>`);
-  parts.push(`<text x="${W - PAD_R + 37}" y="${(ly + 4).toFixed(1)}" text-anchor="middle" font-family="Helvetica,Arial,sans-serif" font-size="11.5" font-weight="bold" fill="#000">${fmtPrice(last)}</text>`);
+  parts.push(`<text x="${W - PAD_R + 37}" y="${(ly + 4).toFixed(1)}" text-anchor="middle" font-family="${FONT_STACK}" font-size="11.5" font-weight="bold" fill="#000">${fmtPrice(last)}</text>`);
 
   // header + footer
-  parts.push(`<text x="${PAD_L + 6}" y="22" font-family="Helvetica,Arial,sans-serif" font-size="15" font-weight="bold" fill="#FFFFFF">${esc(opts.pair)}  ${esc(opts.tf)}</text>`);
-  parts.push(`<text x="${W - PAD_R}" y="22" text-anchor="end" font-family="Helvetica,Arial,sans-serif" font-size="10" fill="${DIM}">${esc(opts.source)}</text>`);
-  parts.push(`<text x="${PAD_L + 6}" y="${H - 8}" font-family="Helvetica,Arial,sans-serif" font-size="10" fill="${DIM}">${esc(fmtTime(candles[0].t, opts.tf))}</text>`);
-  parts.push(`<text x="${W - PAD_R}" y="${H - 8}" text-anchor="end" font-family="Helvetica,Arial,sans-serif" font-size="10" fill="${TEXT}">${esc(fmtTime(candles[candles.length - 1].t, opts.tf))} UTC</text>`);
+  parts.push(`<text x="${PAD_L + 6}" y="22" font-family="${FONT_STACK}" font-size="15" font-weight="bold" fill="#FFFFFF">${esc(opts.pair)}  ${esc(opts.tf)}</text>`);
+  parts.push(`<text x="${W - PAD_R}" y="22" text-anchor="end" font-family="${FONT_STACK}" font-size="10" fill="${DIM}">${esc(opts.source)}</text>`);
+  parts.push(`<text x="${PAD_L + 6}" y="${H - 8}" font-family="${FONT_STACK}" font-size="10" fill="${DIM}">${esc(fmtTime(candles[0].t, opts.tf))}</text>`);
+  parts.push(`<text x="${W - PAD_R}" y="${H - 8}" text-anchor="end" font-family="${FONT_STACK}" font-size="10" fill="${TEXT}">${esc(fmtTime(candles[candles.length - 1].t, opts.tf))} UTC</text>`);
 
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">${parts.join("")}</svg>`;
 }
@@ -126,5 +127,6 @@ export async function renderPanel(
   candles: Candle[],
   opts: { pair: Pair; tf: Tf; source: string }
 ): Promise<Buffer> {
+  await ensureFonts();
   return sharp(Buffer.from(candleChartSvg(candles, opts))).png().toBuffer();
 }

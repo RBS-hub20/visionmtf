@@ -75,9 +75,17 @@ const BINANCE_INTERVAL: Record<Tf, string> = {
   "15M": "15m",
 };
 
-async function fetchBinance(tf: Tf): Promise<Candle[]> {
-  const url = `https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=${BINANCE_INTERVAL[tf]}&limit=${BARS}`;
-  const rows = (await getJson(url)) as unknown[][];
+/**
+ * Binance geo-blocks several cloud regions (HTTP 451) — Vercel's iad1 is
+ * AWS us-east-1 and is among them. data-api.binance.vision is Binance's
+ * public market-data host and is not restricted; Yahoo is the last resort.
+ */
+const BINANCE_HOSTS = [
+  "https://data-api.binance.vision",
+  "https://api.binance.com",
+];
+
+function parseKlines(rows: unknown[][]): Candle[] {
   return rows.map((r) => ({
     t: Number(r[0]),
     o: Number(r[1]),
@@ -85,6 +93,29 @@ async function fetchBinance(tf: Tf): Promise<Candle[]> {
     l: Number(r[3]),
     c: Number(r[4]),
   }));
+}
+
+async function fetchBinance(tf: Tf): Promise<Candle[]> {
+  const qs = `symbol=BTCUSDT&interval=${BINANCE_INTERVAL[tf]}&limit=${BARS}`;
+  const errors: string[] = [];
+
+  for (const host of BINANCE_HOSTS) {
+    try {
+      const rows = (await getJson(`${host}/api/v3/klines?${qs}`)) as unknown[][];
+      if (Array.isArray(rows) && rows.length > 1) return parseKlines(rows);
+      errors.push(`${host}: empty`);
+    } catch (err) {
+      errors.push(`${host}: ${(err as Error).message}`);
+    }
+  }
+
+  // Every Binance host refused — fall back to Yahoo's BTC-USD series.
+  try {
+    return await fetchYahoo("BTC-USD", tf);
+  } catch (err) {
+    errors.push(`yahoo: ${(err as Error).message}`);
+    throw new Error(errors.join(" | "));
+  }
 }
 
 /* ------------------------------------------------------------------ */
@@ -205,6 +236,12 @@ export function candleSourceLabel(pair: Pair): string {
   return process.env.TWELVEDATA_API_KEY ? "TwelveData XAU/USD" : "COMEX GC=F";
 }
 
+/** Yahoo needs its own symbol per pair when used as the fallback. */
+export const YAHOO_SYMBOL: Record<Pair, string> = {
+  XAUUSD: "GC=F",
+  BTCUSD: "BTC-USD",
+};
+
 export async function fetchCandles(pair: Pair, tf: Tf): Promise<Candle[] | null> {
   const td = process.env.TWELVEDATA_API_KEY;
   const key = `${pair}:${tf}:${pair === "XAUUSD" && td ? "td" : "def"}`;
@@ -233,12 +270,24 @@ export type Spot = { price: number; source: string; at: string };
 export async function fetchSpot(pair: Pair): Promise<Spot | null> {
   return cached(`spot:${pair}`, 60_000, async () => {
     if (pair === "BTCUSD") {
-      const d = (await getJson(
-        "https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT"
-      )) as { price: string };
+      for (const host of BINANCE_HOSTS) {
+        try {
+          const d = (await getJson(
+            `${host}/api/v3/ticker/price?symbol=BTCUSDT`
+          )) as { price: string };
+          const price = Number(d.price);
+          if (Number.isFinite(price)) {
+            return { price, source: "Binance", at: new Date().toISOString() };
+          }
+        } catch {
+          // try the next host
+        }
+      }
+      // fall back to the last Yahoo close
+      const candles = await fetchYahoo("BTC-USD", "15M");
       return {
-        price: Number(d.price),
-        source: "Binance",
+        price: candles[candles.length - 1].c,
+        source: "Yahoo BTC-USD",
         at: new Date().toISOString(),
       };
     }

@@ -9,8 +9,14 @@ const nextConfig = {
      * so include them in the serverless bundles explicitly.
      */
     outputFileTracingIncludes: {
-      "/api/cron/analyze": ["./public/charts/latest/**", "./data/**"],
-      "/api/collage": ["./public/charts/latest/**"],
+      // assets/fonts is required: Vercel's runtime has no system fonts, so
+      // without it sharp renders every SVG label as tofu boxes.
+      "/api/cron/analyze": [
+        "./public/charts/latest/**",
+        "./data/**",
+        "./assets/fonts/**",
+      ],
+      "/api/collage": ["./public/charts/latest/**", "./assets/fonts/**"],
       "/live": ["./public/charts/latest/**", "./data/**"],
     },
   },
