@@ -3,14 +3,7 @@ import { analysePair, VISION_MODEL } from "@/lib/v5/analyst";
 import { appendRows, readHistory, saveRows } from "@/lib/v5/store";
 import { getStats, settlePending } from "@/lib/v5/outcome_tracker";
 import { lastFailures } from "@/lib/v5/market_data";
-import {
-  channelsConfigured,
-  sendMarketWatch,
-  sendSignal,
-  signalText,
-  vipSignalText,
-} from "@/lib/telegram_v5";
-import { timingSafeEqual } from "crypto";
+import { channelsConfigured, sendMarketWatch, sendSignal } from "@/lib/telegram_v5";
 import {
   MIN_CHART_CONFIDENCE,
   evaluateChartGate,
@@ -67,73 +60,8 @@ type Evaluated = {
   tradable: boolean;
 };
 
-/* ================================================================== *
- *  TEMPORARY — V5.6 dual-channel proof. REMOVE once verified.
- *  Publishes ONE clearly-labelled dummy signal to both channels so the
- *  fan-out can be observed end to end. Skips Claude, the chart budget
- *  and the history file entirely.
- * ================================================================== */
-
-const TEST_PREFIX = "\u{1F9EA} TEST SIGNAL - IGNORE - Dual Channel Check - ";
-
-function safeEqual(a: string, b: string) {
-  const x = Buffer.from(a);
-  const y = Buffer.from(b);
-  return x.length === y.length && timingSafeEqual(x, y);
-}
-
-function testAuthorised(supplied: string | null): boolean {
-  // CRON_SECRET preferred; bot token only as the fallback the spec asked for.
-  const expected = process.env.CRON_SECRET || process.env.TELEGRAM_BOT_TOKEN;
-  // No secret configured at all => refuse; this endpoint posts to live channels.
-  if (!expected || !supplied) return false;
-  return safeEqual(supplied, expected);
-}
-
-async function handleTestSignal(): Promise<Response> {
-  const dummy: Analysis = {
-    pair: "XAUUSD",
-    action: "BUY",
-    confidence: 91,
-    score_breakdown: { W: 24, D: 23, "4H": 19, H1: 14, "15M": 11 },
-    reason_taglish: "Test lang - checking dual channel",
-    session: "London",
-    sl: 4300,
-    tp1: 4420,
-    tp2: 4480,
-  };
-  const entry = 4352.2;
-  const threshold = SEND_THRESHOLD.XAUUSD;
-
-  const res = await sendSignal(dummy, entry, threshold, { prefix: TEST_PREFIX });
-
-  return NextResponse.json({
-    test: true,
-    type: "SIGNAL",
-    delivered_public: res.deliveredPublic,
-    delivered_vip: res.deliveredVip,
-    channels: channelsConfigured(),
-    detail: res.channels,
-    caption_preview: {
-      public: TEST_PREFIX + signalText(dummy, entry, threshold),
-      vip: TEST_PREFIX + vipSignalText(dummy, entry, threshold),
-    },
-  });
-}
-
-/* ================ end temporary test block ================ */
-
 async function handle(req: Request) {
   const now = new Date();
-  const params = new URL(req.url).searchParams;
-
-  // TEMPORARY: dual-channel proof. Runs before anything else and returns early.
-  if (params.get("test_signal") === "1") {
-    if (!testAuthorised(params.get("secret"))) {
-      return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 });
-    }
-    return handleTestSignal();
-  }
 
   if (!authorised(req)) {
     return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 });
