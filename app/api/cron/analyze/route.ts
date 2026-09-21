@@ -3,7 +3,7 @@ import { analysePair, VISION_MODEL } from "@/lib/v5/analyst";
 import { appendRows, readHistory, saveRows } from "@/lib/v5/store";
 import { getStats, settlePending } from "@/lib/v5/outcome_tracker";
 import { lastFailures } from "@/lib/v5/market_data";
-import { sendMarketWatch, sendSignal } from "@/lib/telegram_v5";
+import { channelsConfigured, sendMarketWatch, sendSignal } from "@/lib/telegram_v5";
 import {
   MIN_CHART_CONFIDENCE,
   evaluateChartGate,
@@ -19,7 +19,7 @@ import {
 } from "@/lib/v5/types";
 
 /**
- * VISION MTF V5.4 — analysis cron (anti-spam, live prices, outcome tracking).
+ * VISION MTF V5.6 — analysis cron (dual-channel, anti-spam, outcome tracking).
  *
  * Runs hourly (GitHub Actions; vercel.json keeps a daily Vercel Cron because
  * the Hobby plan rejects sub-daily schedules).
@@ -101,14 +101,18 @@ async function handle(req: Request) {
   for (const e of evaluated) {
     const { pair, analysis } = e;
     let delivered = false;
+    let deliveredPublic = false;
+    let deliveredVip = false;
     let mode = "QUIET";
     let detail: unknown = { reason: "no-send" };
 
     if (e.tradable) {
-      // ---- SIGNAL MODE — always fires, bypasses the chart budget ----
+      // ---- SIGNAL MODE — PUBLIC + VIP, bypasses the chart budget ----
       mode = "SIGNAL";
       const res = await sendSignal(analysis, e.spot, SEND_THRESHOLD[pair]);
       delivered = res.ok;
+      deliveredPublic = res.deliveredPublic;
+      deliveredVip = res.deliveredVip;
       detail = res;
     } else {
       // ---- CHART UPDATE MODE — budgeted ----
@@ -124,9 +128,12 @@ async function handle(req: Request) {
           );
 
       if (gate.allowed) {
+        // ---- CHART UPDATE — PUBLIC only, never VIP ----
         mode = "CHART_UPDATE";
         const res = await sendMarketWatch(analysis);
         delivered = res.ok;
+        deliveredPublic = res.deliveredPublic;
+        deliveredVip = false;
         detail = res;
         // one chart slot per run, even if both pairs qualify
         if (res.ok) chartSlotTaken = true;
@@ -167,6 +174,8 @@ async function handle(req: Request) {
       threshold: SEND_THRESHOLD[pair],
       type: isSignal ? "SIGNAL" : "WATCH",
       delivered,
+      delivered_public: deliveredPublic,
+      delivered_vip: deliveredVip,
       detail,
       charts: e.charts,
       liveCandles: e.live,
@@ -185,7 +194,7 @@ async function handle(req: Request) {
 
   return NextResponse.json({
     ok: true,
-    version: "5.4",
+    version: "5.6",
     model: VISION_MODEL,
     ranAt: now.toISOString(),
     mock: records.every((r) => r.mock),
@@ -195,6 +204,9 @@ async function handle(req: Request) {
       maxPerDay: 10,
       minConfidence: MIN_CHART_CONFIDENCE,
     },
+    channels: channelsConfigured(),
+    delivered_public: report.some((r) => r.delivered_public === true),
+    delivered_vip: report.some((r) => r.delivered_vip === true),
     outcomes: { checked, settled },
     stats,
     results: report,
