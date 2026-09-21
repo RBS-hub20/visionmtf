@@ -67,6 +67,12 @@ async function getJson(url: string, init?: RequestInit): Promise<unknown> {
 /*  Binance — BTCUSD                                                   */
 /* ------------------------------------------------------------------ */
 
+/** Binance symbol per pair. PAXG is physically-backed gold, 1 token = 1 oz. */
+const BINANCE_SYMBOL: Record<Pair, string> = {
+  BTCUSD: "BTCUSDT",
+  XAUUSD: "PAXGUSDT",
+};
+
 const BINANCE_INTERVAL: Record<Tf, string> = {
   W: "1w",
   D: "1d",
@@ -95,8 +101,8 @@ function parseKlines(rows: unknown[][]): Candle[] {
   }));
 }
 
-async function fetchBinance(tf: Tf): Promise<Candle[]> {
-  const qs = `symbol=BTCUSDT&interval=${BINANCE_INTERVAL[tf]}&limit=${BARS}`;
+async function fetchBinance(pair: Pair, tf: Tf): Promise<Candle[]> {
+  const qs = `symbol=${BINANCE_SYMBOL[pair]}&interval=${BINANCE_INTERVAL[tf]}&limit=${BARS}`;
   const errors: string[] = [];
 
   for (const host of BINANCE_HOSTS) {
@@ -109,9 +115,9 @@ async function fetchBinance(tf: Tf): Promise<Candle[]> {
     }
   }
 
-  // Every Binance host refused — fall back to Yahoo's BTC-USD series.
+  // Every Binance host refused — fall back to Yahoo.
   try {
-    return await fetchYahoo("BTC-USD", tf);
+    return await fetchYahoo(YAHOO_SYMBOL[pair], tf);
   } catch (err) {
     errors.push(`yahoo: ${(err as Error).message}`);
     throw new Error(errors.join(" | "));
@@ -233,7 +239,7 @@ async function fetchTwelveData(tf: Tf, apiKey: string): Promise<Candle[]> {
 
 export function candleSourceLabel(pair: Pair): string {
   if (pair === "BTCUSD") return "Binance BTCUSDT";
-  return process.env.TWELVEDATA_API_KEY ? "TwelveData XAU/USD" : "COMEX GC=F";
+  return process.env.TWELVEDATA_API_KEY ? "TwelveData XAU/USD" : "Binance PAXG (gold)";
 }
 
 /** Yahoo needs its own symbol per pair when used as the fallback. */
@@ -246,9 +252,11 @@ export async function fetchCandles(pair: Pair, tf: Tf): Promise<Candle[] | null>
   const td = process.env.TWELVEDATA_API_KEY;
   const key = `${pair}:${tf}:${pair === "XAUUSD" && td ? "td" : "def"}`;
   return cached(key, TTL_MS[tf], async () => {
-    if (pair === "BTCUSD") return fetchBinance(tf);
-    if (td) return fetchTwelveData(tf, td);
-    return fetchYahoo("GC=F", tf);
+    if (pair === "XAUUSD" && td) return fetchTwelveData(tf, td);
+    // Binance first for BOTH pairs: Yahoo rate-limits datacenter IPs, so on
+    // Vercel it fails persistently. PAXG tracks spot to ~0.1%, far closer
+    // than COMEX GC=F futures, and has all five intervals natively.
+    return fetchBinance(pair, tf);
   });
 }
 
@@ -284,22 +292,43 @@ export async function fetchSpot(pair: Pair): Promise<Spot | null> {
         }
       }
       // fall back to the last Yahoo close
-      const candles = await fetchYahoo("BTC-USD", "15M");
+      const candles = await fetchYahoo(YAHOO_SYMBOL.BTCUSD, "15M");
       return {
         price: candles[candles.length - 1].c,
         source: "Yahoo BTC-USD",
         at: new Date().toISOString(),
       };
     }
-    const d = (await getJson("https://api.gold-api.com/price/XAU")) as {
-      price: number;
-      updatedAt?: string;
-    };
-    return {
-      price: Number(d.price),
-      source: "gold-api XAU/USD spot",
-      at: d.updatedAt ?? new Date().toISOString(),
-    };
+    try {
+      const d = (await getJson("https://api.gold-api.com/price/XAU")) as {
+        price: number;
+        updatedAt?: string;
+      };
+      const price = Number(d.price);
+      if (Number.isFinite(price)) {
+        return {
+          price,
+          source: "gold-api XAU/USD spot",
+          at: d.updatedAt ?? new Date().toISOString(),
+        };
+      }
+    } catch {
+      // fall through to PAXG
+    }
+    for (const host of BINANCE_HOSTS) {
+      try {
+        const d = (await getJson(
+          `${host}/api/v3/ticker/price?symbol=PAXGUSDT`
+        )) as { price: string };
+        const price = Number(d.price);
+        if (Number.isFinite(price)) {
+          return { price, source: "Binance PAXG", at: new Date().toISOString() };
+        }
+      } catch {
+        // try the next host
+      }
+    }
+    throw new Error("no gold price source reachable");
   });
 }
 
