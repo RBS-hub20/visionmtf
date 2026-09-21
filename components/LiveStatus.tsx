@@ -5,6 +5,7 @@ import { motion } from "framer-motion";
 import { Activity, Clock, Target, ArrowUpRight, Waves } from "lucide-react";
 import Link from "next/link";
 import { liveStatus, beta, site, type AssetStatus } from "@/lib/site";
+import { EnginePrice, EnginePriceSource } from "./EnginePrice";
 import { SectionHeading } from "./ui/SectionHeading";
 import { Reveal } from "./ui/Reveal";
 import { cn } from "@/lib/utils";
@@ -107,13 +108,18 @@ function AssetCard({ asset }: { asset: AssetStatus }) {
           <div className="flex items-center gap-1.5 text-[0.55rem] font-semibold uppercase tracking-[0.14em] text-silver-deep">
             <Activity className="h-3 w-3" strokeWidth={2.5} /> Current
           </div>
-          <div className="num mt-1 text-base font-bold text-white">{asset.price}</div>
+          <div className="num mt-1 text-base font-bold text-white">
+            <EnginePrice pair={asset.symbol} field="price" fallback={asset.price} />
+          </div>
+          <EnginePriceSource pair={asset.symbol} />
         </div>
         <div className="rounded-xl border border-line bg-black/50 px-3 py-2.5">
           <div className="flex items-center gap-1.5 text-[0.55rem] font-semibold uppercase tracking-[0.14em] text-silver-deep">
             <Target className="h-3 w-3" strokeWidth={2.5} /> Watching
           </div>
-          <div className="num mt-1 text-base font-bold text-neon">{asset.target}</div>
+          <div className="num mt-1 text-base font-bold text-neon">
+            <EnginePrice pair={asset.symbol} field="watching" fallback={asset.target} />
+          </div>
         </div>
       </div>
 

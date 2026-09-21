@@ -97,7 +97,8 @@ export const timeframes: Timeframe[] = [
 /* ------------------------------------------------------------------ */
 
 export type AssetStatus = {
-  symbol: string;
+  /** Narrowed so the live-price component can key off it. */
+  symbol: "XAUUSD" | "BTCUSD";
   name: string;
   state: "WAITING" | "EXECUTE" | "STAND DOWN";
   confidence: number;
@@ -113,8 +114,9 @@ export const liveStatus: AssetStatus[] = [
     name: "Gold / US Dollar",
     state: "WAITING",
     confidence: 68,
-    price: "$2,655.40",
-    target: "$2,635.00",
+    // fallback only — replaced live by <EnginePrice>
+    price: "$4,352.20",
+    target: "$4,320.00",
     note: "Price sitting in premium. Holding fire until the 4H discount order block is tapped.",
     biases: [
       { tf: "W", state: "bullish" },
@@ -129,8 +131,9 @@ export const liveStatus: AssetStatus[] = [
     name: "Bitcoin / US Dollar",
     state: "WAITING",
     confidence: 74,
-    price: "$67,420",
-    target: "$65,800",
+    // fallback only — replaced live by <EnginePrice>
+    price: "$81,942.40",
+    target: "$78,400.00",
     note: "Daily trend intact. 1H FVG unfilled — needs a 15M break of structure to arm the entry.",
     biases: [
       { tf: "W", state: "bullish" },

@@ -4,6 +4,7 @@ import Link from "next/link";
 import { motion } from "framer-motion";
 import { ArrowUpRight, LineChart, ShieldCheck, Cpu } from "lucide-react";
 import { stats, marquee, beta, site } from "@/lib/site";
+import { EnginePrice } from "./EnginePrice";
 import { HeroVisual } from "./HeroVisual";
 
 const ease = [0.22, 1, 0.36, 1] as const;
@@ -29,7 +30,10 @@ export function Hero() {
               <span className="truncate text-2xs font-semibold tracking-wide text-neon sm:text-xs">
                 LIVE: AI is <span className="font-bold">WAITING</span> on XAUUSD
                 <span className="num mx-1 text-white">68%</span>
-                <span className="hidden text-silver-dim sm:inline">· Watching $2,635 OB</span>
+                <span className="hidden text-silver-dim sm:inline">
+                  · Watching{" "}
+                  <EnginePrice pair="XAUUSD" field="watching" fallback="$4,320.00" /> OB
+                </span>
               </span>
               <span className="pointer-events-none absolute inset-y-0 -left-1/3 w-1/3 skew-x-[-18deg] bg-gradient-to-r from-transparent via-white/10 to-transparent animate-shimmer" />
             </motion.div>
