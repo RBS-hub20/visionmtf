@@ -1,27 +1,39 @@
 import { NextResponse } from "next/server";
-import { analysePair } from "@/lib/v5/analyst";
-import { appendSignals, readSignals } from "@/lib/v5/store";
-import { sendNoTradeUpdate, sendSignal } from "@/lib/telegram_v5";
+import { analysePair, VISION_MODEL } from "@/lib/v5/analyst";
+import { appendSignals } from "@/lib/v5/store";
+import { sendMarketWatch, sendSignal } from "@/lib/telegram_v5";
+import {
+  MIN_CHART_CONFIDENCE,
+  evaluateChartGate,
+  readBudget,
+  type ChartGate,
+} from "@/lib/v5/chart_budget";
 import {
   PAIRS,
   SEND_THRESHOLD,
-  WAIT_UPDATE_INTERVAL_MS,
+  type Analysis,
   type Pair,
   type SignalKind,
   type SignalRecord,
-  type SignalsFile,
 } from "@/lib/v5/types";
 
 /**
- * VISION MTF V5 — analysis cron.
- * Scheduled every 30 minutes by vercel.json.
+ * VISION MTF V5.2 — analysis cron (anti-spam).
  *
- * 1. Load the five chart images per pair from public/charts/latest
- * 2. Send them to the vision model top-down (W, D, 4H, H1, 15M)
- * 3. Persist the result to data/signals.json (see lib/v5/store for the
- *    read-only-filesystem caveat on Vercel)
- * 4. Broadcast: XAUUSD at >=85, BTCUSD at >=90; otherwise a WAIT update
- *    at most once every 2 hours per pair.
+ * Runs hourly (GitHub Actions; vercel.json keeps a daily Vercel Cron because
+ * the Hobby plan rejects sub-daily schedules).
+ *
+ * Three outcomes per pair:
+ *
+ *   1. SIGNAL MODE      action != WAIT and confidence >= threshold
+ *                       (XAUUSD 85, BTCUSD 90). Fires immediately, any hour,
+ *                       and bypasses the chart budget entirely.
+ *
+ *   2. CHART UPDATE     MARKET WATCH post, capped at 10/day (one per 2.4h),
+ *                       alternating pairs, skipped below 60 confidence.
+ *
+ *   3. QUIET MODE       analyse, persist, update /live — send nothing.
+ *                       This is the common case.
  */
 
 export const runtime = "nodejs";
@@ -36,12 +48,14 @@ function authorised(req: Request) {
   return new URL(req.url).searchParams.get("secret") === secret;
 }
 
-function dueForWaitUpdate(last: string | undefined, now: Date) {
-  if (!last) return true;
-  const prev = Date.parse(last);
-  if (!Number.isFinite(prev)) return true;
-  return now.getTime() - prev >= WAIT_UPDATE_INTERVAL_MS;
-}
+type Evaluated = {
+  pair: Pair;
+  analysis: Analysis;
+  mock: boolean;
+  charts: number;
+  note?: string;
+  tradable: boolean;
+};
 
 async function handle(req: Request) {
   const now = new Date();
@@ -50,34 +64,73 @@ async function handle(req: Request) {
     return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 });
   }
 
-  const existing = await readSignals();
-  const records: SignalRecord[] = [];
-  const waitStamps: SignalsFile["lastWaitUpdateAt"] = {};
-  const report: Record<string, unknown>[] = [];
-
+  // ---- 1. analyse both pairs -------------------------------------------
+  const evaluated: Evaluated[] = [];
   for (const pair of PAIRS as readonly Pair[]) {
     const { analysis, mock, charts, note } = await analysePair(pair, now);
-    const threshold = SEND_THRESHOLD[pair];
+    evaluated.push({
+      pair,
+      analysis,
+      mock,
+      charts,
+      note,
+      tradable:
+        analysis.action !== "WAIT" && analysis.confidence >= SEND_THRESHOLD[pair],
+    });
+  }
 
-    const tradable = analysis.action !== "WAIT" && analysis.confidence >= threshold;
-    const waitDue =
-      !tradable && dueForWaitUpdate(existing.lastWaitUpdateAt[pair], now);
+  // ---- 2. decide, then act ---------------------------------------------
+  // Read the budget once so both pairs are judged against the same snapshot.
+  const budget = await readBudget();
 
+  // A pair only yields its turn if the other is genuinely a candidate,
+  // otherwise one quiet pair would block the other indefinitely.
+  const chartCandidates = evaluated.filter(
+    (e) => !e.tradable && e.analysis.confidence >= MIN_CHART_CONFIDENCE
+  );
+
+  const records: SignalRecord[] = [];
+  const report: Record<string, unknown>[] = [];
+  let chartSlotTaken = false;
+
+  for (const e of evaluated) {
+    const { pair, analysis } = e;
     let kind: SignalKind = "LOGGED";
     let delivered = false;
-    let delivery: unknown = { skipped: "below-threshold" };
+    let mode = "QUIET";
+    let detail: unknown = { reason: "no-send" };
 
-    if (tradable) {
+    if (e.tradable) {
+      // ---- SIGNAL MODE — always fires, bypasses the chart budget ----
+      mode = "SIGNAL";
       kind = "SIGNAL";
-      const res = await sendSignal(analysis, null, threshold);
+      const res = await sendSignal(analysis, null, SEND_THRESHOLD[pair]);
       delivered = res.ok;
-      delivery = res;
-    } else if (waitDue) {
-      kind = "WAIT_UPDATE";
-      const res = await sendNoTradeUpdate(analysis);
-      delivered = res.ok;
-      delivery = res;
-      waitStamps[pair] = now.toISOString();
+      detail = res;
+    } else {
+      // ---- CHART UPDATE MODE — budgeted ----
+      const otherEligible = chartCandidates.some((c) => c.pair !== pair);
+      const gate: ChartGate = chartSlotTaken
+        ? { allowed: false, reason: "not-this-pairs-turn", preferred: pair }
+        : evaluateChartGate(
+            pair,
+            analysis.confidence,
+            budget,
+            now,
+            otherEligible
+          );
+
+      if (gate.allowed) {
+        mode = "CHART_UPDATE";
+        kind = "WAIT_UPDATE";
+        const res = await sendMarketWatch(analysis);
+        delivered = res.ok;
+        detail = res;
+        // one chart slot per run, even if both pairs qualify
+        if (res.ok) chartSlotTaken = true;
+      } else {
+        detail = gate;
+      }
     }
 
     records.push({
@@ -88,30 +141,38 @@ async function handle(req: Request) {
       kind,
       delivered,
       collage: null,
-      mock,
+      mock: e.mock,
     });
 
     report.push({
       pair,
+      mode,
       action: analysis.action,
       confidence: analysis.confidence,
-      threshold,
+      threshold: SEND_THRESHOLD[pair],
       kind,
       delivered,
-      delivery,
-      charts,
-      mock,
-      ...(note ? { note } : {}),
+      detail,
+      charts: e.charts,
+      mock: e.mock,
+      ...(e.note ? { note: e.note } : {}),
     });
   }
 
-  const saved = await appendSignals(records, waitStamps);
+  const saved = await appendSignals(records, {});
 
   return NextResponse.json({
     ok: true,
-    version: 5,
+    version: "5.2",
+    model: VISION_MODEL,
     ranAt: now.toISOString(),
     mock: records.every((r) => r.mock),
+    chartBudget: {
+      lastPost: budget.lastPost,
+      lastPair: budget.lastPair,
+      maxPerDay: 10,
+      minConfidence: MIN_CHART_CONFIDENCE,
+    },
     results: report,
     stored: saved.signals.length,
   });

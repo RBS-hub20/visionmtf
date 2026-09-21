@@ -1,5 +1,5 @@
-import OpenAI from "openai";
-import { loadCharts, toDataUrl } from "./charts";
+import Anthropic from "@anthropic-ai/sdk";
+import { loadCharts } from "./charts";
 import {
   TFS,
   breakdownTotal,
@@ -12,20 +12,35 @@ import {
 } from "./types";
 
 /** The SMC prop-trader system prompt, applied to the five chart images. */
-export const VISION_PROMPT = `You are SMC Prop Trader, London Fix specialist.
-Analyze 5 chart IMAGES top-down (W,D,4H,1H,15M).
-WEEKLY/DAILY: Ano trend? Bullish/Bearish/Range? Aligned? BOS/CHoCH?
-4H/1H: Nasa Discount/Premium? Valid OB/FVG hold? Liquidity sweep?
-15M: BOS/ChoCH for entry?
+export const VISION_PROMPT = `You are SMC Prop Trader, London Fix specialist, 10 years XAUUSD + BTC.
+Analyze 5 chart IMAGES top-down (W, D, 4H, 1H, 15M).
+WEEKLY/DAILY: Ano trend? Bullish/Bearish/Range? Aligned ba? May BOS/CHoCH?
+4H/1H: Nasa Discount ba o Premium? May valid OB o FVG ba na hinohold? May liquidity sweep?
+15M: May BOS or ChoCH ba para entry?
 Rules:
-1. W and D not aligned = WAIT
-2. XAUUSD: London Fix 10:30am GMT, NY Open 8am EST focus, SL 80-150 pips
-3. BTC: 24/7, ATR SL, 92%+ confidence only
-4. BUY only Discount, SELL only Premium
+   1. Kung W at D hindi aligned = WAIT agad
+   2. XAUUSD: Focus London Fix 10:30am GMT and NY Open 8am EST. SL 80-150 pips
+   3. BTC: 24/7, ATR-based SL, 92%+ confidence only
+   4. BUY only sa Discount, SELL only sa Premium
 Scoring: W 25, D 25, 4H 20, H1 15, 15M 15 = 100
-Output JSON ONLY: {"pair":"XAUUSD","action":"BUY/SELL/WAIT","confidence":0-100,"score_breakdown":{"W":0-25,"D":0-25,"4H":0-20,"H1":0-15,"15M":0-15},"reason_taglish":"2 sentences Taglish","session":"London/NY/Asian","sl":null,"tp1":null,"tp2":null}`;
+Output JSON ONLY: {"pair":"XAUUSD","action":"BUY or SELL or WAIT","confidence":0-100,"score_breakdown":{"W":0-25,"D":0-25,"4H":0-20,"H1":0-15,"15M":0-15},"reason_taglish":"2 sentences Taglish","session":"London/NY/Asian","sl":null,"tp1":null,"tp2":null}`;
 
-export const VISION_MODEL = process.env.OPENAI_VISION_MODEL ?? "gpt-4o";
+/**
+ * NOTE ON MODEL CHOICE
+ * The spec asked for `claude-3-5-sonnet-20241022`. That model was RETIRED on
+ * 2025-10-28 and every request to it now fails, which would have made this
+ * integration fall back to mock output permanently. `claude-sonnet-5` is the
+ * documented successor in the same tier and is cheaper ($2/$10 per MTok).
+ * Override with ANTHROPIC_VISION_MODEL if you need a different one.
+ */
+export const VISION_MODEL = process.env.ANTHROPIC_VISION_MODEL ?? "claude-sonnet-5";
+
+/**
+ * Sonnet 5 rejects `temperature` / `top_p` / `top_k` and `thinking.budget_tokens`
+ * with a 400 — do not add them. Thinking runs adaptively by default; `effort: low`
+ * keeps it shallow, which is what this hourly job wants for cost.
+ */
+const MAX_TOKENS = 2000;
 
 export type AnalysisOutcome = {
   analysis: Analysis;
@@ -38,6 +53,46 @@ const num = (v: unknown): number | null => {
   const n = Number(v);
   return Number.isFinite(n) ? n : null;
 };
+
+/** Pull the first balanced JSON object out of a text response. */
+export function extractJson(text: string): unknown {
+  const trimmed = text.trim();
+  try {
+    return JSON.parse(trimmed);
+  } catch {
+    // fall through — the model may have wrapped it in prose or a fence
+  }
+  const start = trimmed.indexOf("{");
+  if (start === -1) return {};
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let i = start; i < trimmed.length; i++) {
+    const ch = trimmed[i];
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (ch === "\\") {
+      escaped = true;
+      continue;
+    }
+    if (ch === '"') inString = !inString;
+    if (inString) continue;
+    if (ch === "{") depth++;
+    else if (ch === "}") {
+      depth--;
+      if (depth === 0) {
+        try {
+          return JSON.parse(trimmed.slice(start, i + 1));
+        } catch {
+          return {};
+        }
+      }
+    }
+  }
+  return {};
+}
 
 /** Coerce whatever the model returned into a valid Analysis. */
 export function coerceAnalysis(raw: unknown, pair: Pair, now: Date): Analysis {
@@ -83,8 +138,8 @@ export function coerceAnalysis(raw: unknown, pair: Pair, now: Date): Analysis {
 }
 
 /**
- * Deterministic stand-in used when OPENAI_API_KEY is absent or the call fails,
- * so the cron route and /live always return well-formed data.
+ * Deterministic stand-in used when ANTHROPIC_API_KEY is absent or the call
+ * fails, so the cron route and /live always return well-formed data.
  */
 export function mockAnalysis(pair: Pair, now: Date): Analysis {
   const base =
@@ -108,20 +163,20 @@ export function mockAnalysis(pair: Pair, now: Date): Analysis {
   };
 }
 
-/** Send the five chart images to the vision model and parse the JSON reply. */
+/** Send the five chart images to Claude and parse the JSON verdict. */
 export async function analysePair(
   pair: Pair,
   now = new Date()
 ): Promise<AnalysisOutcome> {
   const charts = await loadCharts(pair);
-  const apiKey = process.env.OPENAI_API_KEY;
+  const apiKey = process.env.ANTHROPIC_API_KEY;
 
   if (!apiKey) {
     return {
       analysis: mockAnalysis(pair, now),
       mock: true,
       charts: charts.length,
-      note: "OPENAI_API_KEY not set — returning mock analysis",
+      note: "ANTHROPIC_API_KEY not set — returning mock analysis",
     };
   }
   if (charts.length === 0) {
@@ -134,43 +189,72 @@ export async function analysePair(
   }
 
   try {
-    const client = new OpenAI({ apiKey });
-    const res = await client.chat.completions.create({
+    const anthropic = new Anthropic({ apiKey });
+
+    const content: Anthropic.ContentBlockParam[] = [
+      {
+        type: "text",
+        text: `Pair: ${pair}. Images follow in order: ${TFS.join(", ")}. Current UTC time: ${now.toISOString()}. Return JSON only.`,
+      },
+      ...charts.map(
+        (c): Anthropic.ContentBlockParam => ({
+          type: "image",
+          source: {
+            type: "base64",
+            media_type: "image/png",
+            data: c.buffer.toString("base64"),
+          },
+        })
+      ),
+    ];
+
+    const res = await anthropic.messages.create({
       model: VISION_MODEL,
-      temperature: 0.2,
-      response_format: { type: "json_object" },
-      messages: [
-        { role: "system", content: VISION_PROMPT },
-        {
-          role: "user",
-          content: [
-            {
-              type: "text",
-              text: `Pair: ${pair}. Images follow in order: ${TFS.join(", ")}. Current UTC time: ${now.toISOString()}. Return JSON only.`,
-            },
-            ...charts.map((c) => ({
-              type: "image_url" as const,
-              image_url: { url: toDataUrl(c.buffer), detail: "high" as const },
-            })),
-          ],
-        },
-      ],
+      max_tokens: MAX_TOKENS,
+      system: VISION_PROMPT,
+      output_config: { effort: "low" },
+      messages: [{ role: "user", content }],
     });
 
-    const text = res.choices[0]?.message?.content ?? "{}";
+    if (res.stop_reason === "refusal") {
+      return {
+        analysis: mockAnalysis(pair, now),
+        mock: true,
+        charts: charts.length,
+        note: `model declined (${res.stop_details?.category ?? "unknown"}) — using mock`,
+      };
+    }
+
+    const text = res.content
+      .filter((b): b is Anthropic.TextBlock => b.type === "text")
+      .map((b) => b.text)
+      .join("\n");
+
+    if (!text.trim()) {
+      return {
+        analysis: mockAnalysis(pair, now),
+        mock: true,
+        charts: charts.length,
+        note: `empty response (stop_reason: ${res.stop_reason}) — using mock`,
+      };
+    }
+
     return {
-      analysis: coerceAnalysis(JSON.parse(text), pair, now),
+      analysis: coerceAnalysis(extractJson(text), pair, now),
       mock: false,
       charts: charts.length,
     };
   } catch (err) {
-    const message = (err as Error).message;
-    console.error(`[v5/analyst] ${pair} vision call failed:`, message);
+    const message =
+      err instanceof Anthropic.APIError
+        ? `${err.status} ${err.message}`
+        : (err as Error).message;
+    console.error(`[v5/analyst] ${pair} Claude call failed:`, message);
     return {
       analysis: mockAnalysis(pair, now),
       mock: true,
       charts: charts.length,
-      note: `vision call failed, using mock: ${message}`,
+      note: `Claude call failed, using mock: ${message}`,
     };
   }
 }

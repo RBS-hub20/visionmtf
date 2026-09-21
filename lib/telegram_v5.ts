@@ -1,8 +1,9 @@
 import { buildCollage } from "./v5/charts";
+import { canPostChart, recordChartPost } from "./v5/chart_budget";
 import { TFS, type Analysis, type Pair } from "./v5/types";
 
 /**
- * VISION MTF V5 — Telegram delivery.
+ * VISION MTF V5.2 — Telegram delivery.
  *
  * Both senders post a collage of the five timeframe charts with the message as
  * the photo caption. If no charts exist yet they fall back to a text message,
@@ -57,6 +58,21 @@ export function signalText(a: Analysis, price: number | null, threshold: number)
   ].join("\n");
 }
 
+export function marketWatchText(a: Analysis) {
+  const direction = a.action === "SELL" ? "Premium" : "Discount";
+  return [
+    `\u23F3 VISION MTF - MARKET WATCH`,
+    ``,
+    `${a.pair} | Score: ${a.confidence}/100 | ${a.session}`,
+    `Status: Waiting for ${direction}/BOS`,
+    ``,
+    `AI: ${a.reason_taglish}`,
+    ``,
+    `Next signal check: 60 mins`,
+  ].join("\n");
+}
+
+/** @deprecated V5.2 replaced this with sendMarketWatch (rate limited to 10/day). */
 export function noTradeText(a: Analysis) {
   return [
     `⏳ VISION MTF - NO TRADE UPDATE`,
@@ -140,7 +156,26 @@ export async function sendSignal(
   );
 }
 
-/** Broadcast the periodic "still waiting, here is why" update. */
+/**
+ * @deprecated V5.2 — superseded by {@link sendMarketWatch}, which is rate
+ * limited to 10 posts a day. Kept so older call sites keep compiling.
+ */
 export async function sendNoTradeUpdate(a: Analysis): Promise<SendResult> {
   return post(a.pair, noTradeText(a), `WAIT ${a.pair} — ${a.confidence}/100`);
 }
+
+/**
+ * Low-priority chart update. Subject to the 10-a-day budget — call
+ * {@link canPostChart} first, then {@link recordChartPost} on success.
+ */
+export async function sendMarketWatch(a: Analysis): Promise<SendResult> {
+  const res = await post(
+    a.pair,
+    marketWatchText(a),
+    `MARKET WATCH ${a.pair} — ${a.confidence}/100`
+  );
+  if (res.ok) await recordChartPost(a.pair);
+  return res;
+}
+
+export { canPostChart, recordChartPost };

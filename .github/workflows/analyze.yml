@@ -2,9 +2,13 @@
 #
 # Vercel's Hobby plan caps cron jobs at once per day, and a sub-daily schedule
 # in vercel.json makes the whole DEPLOYMENT fail. So vercel.json runs daily and
-# this workflow provides the real 30-minute cadence for free.
+# this workflow is the real runner.
 #
-# If you upgrade to Vercel Pro: set vercel.json to "*/30 * * * *" and disable
+# V5.2: hourly (24 calls/day) instead of every 30 min (48) — halves the Claude
+# bill. The 10-a-day chart-post budget is enforced in the route itself, so a
+# faster cadence would not produce more Telegram traffic anyway.
+#
+# If you upgrade to Vercel Pro: move the schedule into vercel.json and disable
 # this workflow (Actions tab -> Analyze -> Disable workflow).
 #
 # Optional repo secrets (Settings -> Secrets and variables -> Actions):
@@ -15,7 +19,7 @@ name: Analyze
 
 on:
   schedule:
-    - cron: "*/30 * * * *"
+    - cron: "0 * * * *"
   workflow_dispatch:
 
 jobs:

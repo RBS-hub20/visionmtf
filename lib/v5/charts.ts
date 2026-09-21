@@ -33,10 +33,6 @@ export async function loadCharts(pair: Pair): Promise<LoadedChart[]> {
   return out;
 }
 
-export function toDataUrl(buffer: Buffer) {
-  return `data:image/png;base64,${buffer.toString("base64")}`;
-}
-
 const COLLAGE_W = 1600;
 const CELL_W = 800;
 const CELL_H = 500;

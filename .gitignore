@@ -37,3 +37,6 @@ next-env.d.ts
 tsconfig.tsbuildinfo
 .env*
 !.env.example
+
+# V5 runtime state (not a committed seed)
+data/last_chart_post.json

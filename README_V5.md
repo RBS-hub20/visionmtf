@@ -1,4 +1,4 @@
-# VISION MTF V5.0 — Vision AI Engine
+# VISION MTF V5.2 — Vision AI Engine (Claude)
 
 An **add-only** layer on top of the V4 landing page. The landing page design is
 unchanged; only two hrefs now point at the new `/live` tab.
@@ -12,18 +12,41 @@ unchanged; only two hrefs now point at the new `/live` tab.
 
 ## What it does
 
-Every 30 minutes a Vercel Cron hits `/api/cron/analyze`, which:
+Every hour a GitHub Actions job hits `/api/cron/analyze`, which:
 
 1. Loads the five chart PNGs per pair from `public/charts/latest/`
-2. Sends them to **GPT-4o Vision** with the SMC prop-trader prompt, read
+2. Sends them to **Claude Vision** with the SMC prop-trader prompt, read
    top-down (W → D → 4H → H1 → 15M)
 3. Parses the JSON verdict and scores confluence out of 100
    (W 25, D 25, 4H 20, H1 15, 15M 15)
 4. Appends the result to `data/signals.json`
-5. Broadcasts to Telegram:
-   - **XAUUSD** at **≥ 85** → SIGNAL
-   - **BTCUSD** at **≥ 90** → SIGNAL
-   - otherwise a **WAIT update**, at most once every **2 hours** per pair
+5. Decides what — if anything — to broadcast (see below)
+
+## V5.2 anti-spam
+
+The engine analyses hourly but stays quiet most of the time. Three modes:
+
+| Mode | Trigger | Telegram |
+|---|---|---|
+| **1. SIGNAL** | `action != WAIT` and XAUUSD ≥ **85** / BTCUSD ≥ **90** | Fires **immediately, any hour**. Bypasses the chart budget. |
+| **2. CHART UPDATE** | No signal, confidence ≥ **60**, ≥ **2.4h** since the last chart post, and it's this pair's turn | `⏳ MARKET WATCH` + collage. Capped at **10/day**. |
+| **3. QUIET** | Everything else | **Nothing sent.** Analysis still lands in `data/signals.json` and on `/live`. ~80% of runs. |
+
+Chart-budget rules, in `lib/v5/chart_budget.ts`:
+
+- **2.4h spacing** (`8_640_000` ms) → at most 10 posts per 24h
+- **Alternates pairs** — whichever posted last yields to the other, unless the
+  other is not a candidate (so one quiet pair can't starve the other)
+- **Skips below 60 confidence** — an ugly setup is not worth a notification
+- **One slot per run**, even when both pairs qualify
+- A failed send does **not** consume the slot
+
+State lives in `data/last_chart_post.json` locally, `/tmp/last_chart_post.json`
+on Vercel: `{ "lastPost": "<ISO>", "lastPair": "XAUUSD" }`.
+
+> Because `/tmp` is per-instance and ephemeral, a cold start resets the budget.
+> The real guarantee is "at most 10/day **per warm instance**", not a hard global
+> cap. Swap `readBudget`/`writeBudget` for Vercel KV to make it strict.
 
 `/live` renders the latest run publicly — no password during FREE BETA.
 
@@ -44,7 +67,8 @@ lib/telegram_v5.ts            sendSignal() / sendNoTradeUpdate() + collage uploa
 lib/v5/types.ts               shared types, weights, thresholds
 lib/v5/store.ts               signals.json read/write
 lib/v5/charts.ts              chart loading + sharp collage
-lib/v5/analyst.ts             GPT-4o Vision call, prompt, mock fallback
+lib/v5/analyst.ts             Claude Vision call, prompt, mock fallback
+lib/v5/chart_budget.ts        10-a-day chart-post rate limiter
 
 data/signals.json             signal history (seed)
 vercel.json                   cron schedule
@@ -59,8 +83,8 @@ vercel.json                   cron schedule
 Add to `.env.local` (and to the Vercel dashboard for production):
 
 ```env
-OPENAI_API_KEY=sk-...
-OPENAI_VISION_MODEL=gpt-4o          # optional
+ANTHROPIC_API_KEY=sk-ant-...
+ANTHROPIC_VISION_MODEL=claude-sonnet-5   # optional
 
 TELEGRAM_BOT_TOKEN=123456:ABC-...
 TELEGRAM_CHANNEL_ID=-1001234567890
@@ -74,7 +98,7 @@ MT5_SERVER=
 
 The existing `NEXT_PUBLIC_*` FREE BETA variables are unchanged.
 
-**Everything degrades gracefully.** No `OPENAI_API_KEY` → deterministic mock
+**Everything degrades gracefully.** No `ANTHROPIC_API_KEY` → deterministic mock
 analysis. No Telegram credentials → sends are skipped, not failed. No charts →
 the model is told, and mock output is returned. The route always returns 200
 with valid JSON.
@@ -151,19 +175,42 @@ So the setup is split:
 | | Schedule | Where |
 |---|---|---|
 | Vercel Cron | `0 9 * * *` (daily) | `vercel.json` |
-| **Real 30-min cadence** | `*/30 * * * *` | `.github/workflows/analyze.yml` |
+| **Main runner** | `0 * * * *` (hourly) | `.github/workflows/analyze.yml` |
+
+V5.2 dropped the cadence from every 30 min to hourly: 24 Claude calls a day
+instead of 48, roughly halving the bill. The 10-a-day chart cap is enforced in
+the route, so a faster cadence would not produce more Telegram traffic anyway.
 
 The GitHub Actions workflow calls `/api/cron/analyze` every 30 minutes for free.
 Optional repo secrets: `ANALYZE_URL` (defaults to the production alias) and
 `CRON_SECRET` (must match the Vercel env var).
 
-**On Vercel Pro**, set `vercel.json` to `*/30 * * * *` and disable the workflow
+**On Vercel Pro**, move the schedule into `vercel.json` and disable the workflow
 (Actions → Analyze → Disable workflow).
 
 Note: GitHub's scheduled runs are best-effort and can be delayed during peak
 load, and Actions schedules are suspended after 60 days of repo inactivity.
 
 ---
+
+## ⚠️ Model choice
+
+The V5.2 spec asked for `claude-3-5-sonnet-20241022`. **That model was retired
+on 2025-10-28** — every request to it now fails, which would have left this
+integration permanently falling back to mock output.
+
+`lib/v5/analyst.ts` uses **`claude-sonnet-5`** instead: the documented successor
+in the same tier, and cheaper ($2/$10 per MTok). Override with
+`ANTHROPIC_VISION_MODEL`.
+
+Two API constraints on this model, both enforced in the code:
+
+- `temperature` / `top_p` / `top_k` are **rejected with a 400** — the old
+  `temperature: 0.2` from the GPT-4o version is gone.
+- `thinking.budget_tokens` is rejected too. Thinking runs adaptively; the call
+  uses `output_config: { effort: "low" }` to keep it shallow and cheap, with
+  `max_tokens: 2000` so thinking plus the JSON verdict both fit. The spec's
+  `max_tokens: 1000` would have truncated the response on most runs.
 
 ## Message formats
 
@@ -181,19 +228,21 @@ Session: London
 AI: <2 sentences Taglish>
 ```
 
-**No trade**
+**Market watch** (max 10/day)
 
 ```
-⏳ VISION MTF - NO TRADE UPDATE
+⏳ VISION MTF - MARKET WATCH
 
-XAUUSD | Score: 68/100 🟡 WAIT
-Session: London
+XAUUSD | Score: 68/100 | London
+Status: Waiting for Discount/BOS
 
-Bakit walang signal? <2 sentences Taglish>
-Breakdown: W:22 D:21 4H:14 H1:7 15M:4
+AI: <2 sentences Taglish>
 
-Next check 30 mins
+Next signal check: 60 mins
 ```
+
+`sendNoTradeUpdate()` (the V5.0 format) is kept but **deprecated** — V5.2 uses
+`sendMarketWatch()`, which is subject to the chart budget.
 
 Both post the five-timeframe collage as a photo with the message as caption
 (Telegram caps captions at 1024 chars), falling back to a text message if no
