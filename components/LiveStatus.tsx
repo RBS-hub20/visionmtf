@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import { Activity, Clock, Target, ArrowUpRight, Waves } from "lucide-react";
 import Link from "next/link";
-import { liveStatus, type AssetStatus } from "@/lib/site";
+import { liveStatus, beta, site, type AssetStatus } from "@/lib/site";
 import { SectionHeading } from "./ui/SectionHeading";
 import { Reveal } from "./ui/Reveal";
 import { cn } from "@/lib/utils";
@@ -210,9 +210,14 @@ export function LiveStatus() {
                 <span className="font-bold text-neon">EXECUTE</span> the moment confidence clears 85%
                 — delivered to Telegram in the same second.
               </p>
-              <Link href="#pricing" className="btn-neon h-9 px-4 text-xs">
-                Get the live feed
-                <ArrowUpRight className="h-3.5 w-3.5" strokeWidth={2.5} />
+              <Link
+                href={beta.active ? site.telegram : "#pricing"}
+                target={beta.active ? "_blank" : undefined}
+                rel={beta.active ? "noopener noreferrer" : undefined}
+                className="btn-neon min-h-[2.25rem] shrink-0 whitespace-normal px-4 py-2 text-center text-xs leading-snug"
+              >
+                {beta.active ? beta.cta : "Get the live feed"}
+                <ArrowUpRight className="h-3.5 w-3.5 shrink-0" strokeWidth={2.5} />
               </Link>
             </div>
           </div>

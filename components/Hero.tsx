@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { motion } from "framer-motion";
 import { ArrowUpRight, LineChart, ShieldCheck, Cpu } from "lucide-react";
-import { stats, marquee } from "@/lib/site";
+import { stats, marquee, beta, site } from "@/lib/site";
 import { HeroVisual } from "./HeroVisual";
 
 const ease = [0.22, 1, 0.36, 1] as const;
@@ -75,11 +75,16 @@ export function Hero() {
               transition={{ duration: 0.7, delay: 0.24, ease }}
               className="mt-9 flex w-full flex-col gap-3 sm:w-auto sm:flex-row sm:items-center"
             >
-              <Link href="#pricing" className="btn-neon h-12 px-6 text-[0.95rem]">
-                Get Private Access — $79/mo
-                <ArrowUpRight className="h-4 w-4" strokeWidth={2.5} />
+              <Link
+                href={beta.active ? site.telegram : "#pricing"}
+                target={beta.active ? "_blank" : undefined}
+                rel={beta.active ? "noopener noreferrer" : undefined}
+                className="btn-neon min-h-[3rem] whitespace-normal px-6 py-2.5 text-center text-[0.95rem] leading-snug"
+              >
+                {beta.active ? beta.cta : "Get Private Access — $79/mo"}
+                <ArrowUpRight className="h-4 w-4 shrink-0" strokeWidth={2.5} />
               </Link>
-              <Link href="#live-status" className="btn-ghost h-12 px-6 text-[0.95rem]">
+              <Link href="#live-status" className="btn-ghost min-h-[3rem] px-6 py-2.5 text-[0.95rem]">
                 <LineChart className="h-4 w-4 text-neon" strokeWidth={2.2} />
                 View Live Track Record
               </Link>
@@ -93,7 +98,8 @@ export function Hero() {
               className="mt-6 flex flex-wrap items-center gap-x-5 gap-y-2 text-2xs text-silver-dim"
             >
               <span className="inline-flex items-center gap-1.5">
-                <ShieldCheck className="h-3.5 w-3.5 text-neon" /> Cancel anytime
+                <ShieldCheck className="h-3.5 w-3.5 text-neon" />
+                {beta.active ? "No card needed" : "Cancel anytime"}
               </span>
               <span className="inline-flex items-center gap-1.5">
                 <Cpu className="h-3.5 w-3.5 text-neon" /> 85%+ confidence filter

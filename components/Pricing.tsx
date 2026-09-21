@@ -1,8 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { Check, X, Sparkles, Lock, CreditCard, ArrowUpRight } from "lucide-react";
-import { plans, type Plan } from "@/lib/site";
+import { Check, X, Sparkles, CreditCard, ArrowUpRight, Rocket, Gift } from "lucide-react";
+import { plans, beta, type Plan } from "@/lib/site";
 import { SectionHeading } from "./ui/SectionHeading";
 import { Reveal } from "./ui/Reveal";
 import { cn } from "@/lib/utils";
@@ -40,23 +40,48 @@ function PlanCard({ plan }: { plan: Plan }) {
       </div>
 
       {/* price */}
-      <div className="mt-6 flex items-baseline gap-1.5">
-        <span className="num text-[2.75rem] font-bold leading-none tracking-tight text-white">
-          ${plan.price}
-        </span>
-        <span className="text-sm text-silver-dim">/month</span>
-      </div>
-      <p className="mt-2 text-2xs text-silver-deep">Billed monthly · cancel anytime</p>
+      {beta.active ? (
+        <>
+          <div className="mt-6 flex flex-wrap items-baseline gap-x-3 gap-y-1">
+            <span className="num text-[2.75rem] font-bold leading-none tracking-tight text-neon">
+              FREE
+            </span>
+            <span className="num text-xl font-semibold leading-none text-silver-deep line-through decoration-danger/70 decoration-2">
+              ${plan.price}
+            </span>
+            <span className="text-sm text-silver-dim">/month</span>
+          </div>
+          <p className="mt-2.5 inline-flex items-center gap-1.5 rounded-full border border-neon/30 bg-neon/[0.08] px-2.5 py-1">
+            <Gift className="h-3 w-3 text-neon" strokeWidth={2.5} />
+            <span className="text-[0.62rem] font-bold uppercase tracking-[0.14em] text-neon">
+              {beta.priceNote}
+            </span>
+          </p>
+        </>
+      ) : (
+        <>
+          <div className="mt-6 flex items-baseline gap-1.5">
+            <span className="num text-[2.75rem] font-bold leading-none tracking-tight text-white">
+              ${plan.price}
+            </span>
+            <span className="text-sm text-silver-dim">/month</span>
+          </div>
+          <p className="mt-2 text-2xs text-silver-deep">Billed monthly · cancel anytime</p>
+        </>
+      )}
 
       {/* cta */}
       <Link
         href={plan.href}
         target={plan.href.startsWith("http") ? "_blank" : undefined}
         rel={plan.href.startsWith("http") ? "noopener noreferrer" : undefined}
-        className={cn("mt-6 h-12 w-full", popular ? "btn-neon" : "btn-ghost")}
+        className={cn(
+          "mt-6 min-h-[3rem] w-full whitespace-normal px-4 py-2.5 text-center leading-snug",
+          popular ? "btn-neon" : "btn-ghost"
+        )}
       >
         {plan.cta}
-        <ArrowUpRight className="h-4 w-4" strokeWidth={2.5} />
+        <ArrowUpRight className="h-4 w-4 shrink-0" strokeWidth={2.5} />
       </Link>
 
       <div className="my-6 divider" />
@@ -106,7 +131,11 @@ export function Pricing() {
               <span className="text-silver-metal">The whole desk.</span>
             </>
           }
-          subtitle="No upsells, no signal-group nonsense, no lifetime deals. Pick the market coverage you need and cancel the month you stop finding it useful."
+          subtitle={
+            beta.active
+              ? "Every tier is free while VISION MTF is in public beta. No card, no checkout, no trial timer — join the Telegram channel and use it. Prices below are what each tier will cost once beta ends."
+              : "No upsells, no signal-group nonsense, no lifetime deals. Pick the market coverage you need and cancel the month you stop finding it useful."
+          }
         />
 
         <div className="mt-14 grid items-stretch gap-5 lg:mt-20 lg:grid-cols-3 lg:gap-6">
@@ -121,18 +150,18 @@ export function Pricing() {
         <Reveal delay={0.1}>
           <div className="mt-10 flex flex-col items-center justify-center gap-4 rounded-2xl border border-line bg-card/50 px-6 py-5 sm:flex-row sm:gap-8">
             <span className="inline-flex items-center gap-2 text-2xs text-silver-dim">
-              <Lock className="h-3.5 w-3.5 text-neon" strokeWidth={2.2} />
-              Secure checkout by Stripe
+              <Rocket className="h-3.5 w-3.5 text-neon" strokeWidth={2.2} />
+              Free while in public beta
             </span>
             <span className="hidden h-4 w-px bg-line sm:block" />
             <span className="inline-flex items-center gap-2 text-2xs text-silver-dim">
               <CreditCard className="h-3.5 w-3.5 text-neon" strokeWidth={2.2} />
-              All major cards · Apple Pay · Google Pay
+              No card required
             </span>
             <span className="hidden h-4 w-px bg-line sm:block" />
             <span className="inline-flex items-center gap-2 text-2xs text-silver-dim">
               <Check className="h-3.5 w-3.5 text-neon" strokeWidth={2.8} />
-              Instant Telegram access on payment
+              Instant Telegram access
             </span>
           </div>
         </Reveal>

@@ -9,8 +9,23 @@ export const site = {
   sub: "MULTI TIMEFRAME TRADING",
   tagline: "The AI Prop Trader That Reads Like a Human",
   url: process.env.NEXT_PUBLIC_SITE_URL ?? "https://visionmtf.com",
-  telegram: process.env.NEXT_PUBLIC_TELEGRAM_URL ?? "#pricing",
+  telegram:
+    process.env.NEXT_PUBLIC_TELEGRAM_URL ?? "https://t.me/+r6GrqBhcZ2s3ODc9",
   year: 2026,
+} as const;
+
+/**
+ * FREE BETA.
+ * While `beta.active` is true every call-to-action points at the Telegram
+ * invite, prices render struck through, and no card is collected.
+ * Flip `active` to false to restore paid Stripe checkout.
+ */
+export const beta = {
+  active: true,
+  label: "FREE BETA",
+  cta: "\u{1F680} Join Free Beta - No Card Needed",
+  ctaShort: "\u{1F680} Join Free Beta",
+  priceNote: "FREE during beta",
 } as const;
 
 export const nav = [
@@ -148,8 +163,10 @@ export const plans: Plan[] = [
     name: "Starter",
     price: 79,
     blurb: "Gold only. Everything you need to trade one pair properly.",
-    href: process.env.NEXT_PUBLIC_STRIPE_STARTER_URL ?? "#",
-    cta: "Start with Gold",
+    href: beta.active
+      ? site.telegram
+      : (process.env.NEXT_PUBLIC_STRIPE_STARTER_URL ?? "#"),
+    cta: beta.cta,
     features: [
       { text: "XAUUSD signals", included: true },
       { text: "Full 5-timeframe MTF breakdown", included: true },
@@ -167,8 +184,10 @@ export const plans: Plan[] = [
     price: 149,
     popular: true,
     blurb: "Both markets plus the MT5 EA that executes while you sleep.",
-    href: process.env.NEXT_PUBLIC_STRIPE_PRO_URL ?? "#",
-    cta: "Get Pro Access",
+    href: beta.active
+      ? site.telegram
+      : (process.env.NEXT_PUBLIC_STRIPE_PRO_URL ?? "#"),
+    cta: beta.cta,
     features: [
       { text: "XAUUSD + BTCUSD signals", included: true },
       { text: "Full 5-timeframe MTF breakdown", included: true },
@@ -185,8 +204,10 @@ export const plans: Plan[] = [
     name: "Funded",
     price: 299,
     blurb: "Built for prop-firm challenges and funded accounts under drawdown rules.",
-    href: process.env.NEXT_PUBLIC_STRIPE_FUNDED_URL ?? "#",
-    cta: "Go Funded",
+    href: beta.active
+      ? site.telegram
+      : (process.env.NEXT_PUBLIC_STRIPE_FUNDED_URL ?? "#"),
+    cta: beta.cta,
     features: [
       { text: "Everything in Pro", included: true },
       { text: "Intraday scalp engine", included: true },

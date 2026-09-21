@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { AlertTriangle, ArrowUpRight } from "lucide-react";
-import { site, nav } from "@/lib/site";
+import { site, nav, beta } from "@/lib/site";
 import { Logo } from "./ui/Logo";
 
 export function Footer() {
@@ -24,9 +24,14 @@ export function Footer() {
               decides not to take.
             </p>
           </div>
-          <Link href="#pricing" className="btn-neon h-12 shrink-0 px-6">
-            Join Private Access
-            <ArrowUpRight className="h-4 w-4" strokeWidth={2.5} />
+          <Link
+            href={beta.active ? site.telegram : "#pricing"}
+            target={beta.active ? "_blank" : undefined}
+            rel={beta.active ? "noopener noreferrer" : undefined}
+            className="btn-neon min-h-[3rem] shrink-0 whitespace-normal px-6 py-2.5 text-center leading-snug"
+          >
+            {beta.active ? beta.cta : "Join Private Access"}
+            <ArrowUpRight className="h-4 w-4 shrink-0" strokeWidth={2.5} />
           </Link>
         </div>
 
