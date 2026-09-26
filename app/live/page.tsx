@@ -292,7 +292,7 @@ export default async function LivePage() {
               <span className="chip">
                 last {stats.sampleSize} closed · {stats.pending} open
               </span>
-              {storageBackend() === "kv" && (
+              {storageBackend() !== "file" && (
                 <span className="chip-neon" title="History is stored in Vercel KV and survives restarts">
                   durable
                 </span>
