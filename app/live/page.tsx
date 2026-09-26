@@ -12,7 +12,7 @@ import {
   ScoreCards,
 } from "@/components/live/parts";
 import { History } from "@/components/live/History";
-import { readHistory } from "@/lib/v5/store";
+import { readHistory, storageBackend } from "@/lib/v5/store";
 import { getStats } from "@/lib/v5/outcome_tracker";
 import { chartFile } from "@/lib/v5/charts";
 import { mockAnalysis } from "@/lib/v5/analyst";
@@ -288,8 +288,15 @@ export default async function LivePage() {
                 including the losers.
               </p>
             </div>
-            <span className="chip shrink-0">
-              last {stats.sampleSize} closed · {stats.pending} open
+            <span className="flex shrink-0 items-center gap-2">
+              <span className="chip">
+                last {stats.sampleSize} closed · {stats.pending} open
+              </span>
+              {storageBackend() === "kv" && (
+                <span className="chip-neon" title="History is stored in Vercel KV and survives restarts">
+                  durable
+                </span>
+              )}
             </span>
           </div>
           <History rows={store.rows} stats={stats} />

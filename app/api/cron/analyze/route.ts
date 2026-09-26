@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { analysePair, VISION_MODEL } from "@/lib/v5/analyst";
-import { appendRows, readHistory, saveRows } from "@/lib/v5/store";
+import { appendRows, readHistory, saveRows, storageBackend } from "@/lib/v5/store";
 import { getStats, settlePending } from "@/lib/v5/outcome_tracker";
 import { lastFailures } from "@/lib/v5/market_data";
 import { channelsConfigured, sendMarketWatch, sendSignal } from "@/lib/telegram_v5";
@@ -204,6 +204,7 @@ async function handle(req: Request) {
       maxPerDay: 10,
       minConfidence: MIN_CHART_CONFIDENCE,
     },
+    storage: storageBackend(),
     channels: channelsConfigured(),
     delivered_public: report.some((r) => r.delivered_public === true),
     delivered_vip: report.some((r) => r.delivered_vip === true),

@@ -1,5 +1,6 @@
 import { promises as fs } from "fs";
 import path from "path";
+import { KV_KEYS, kvEnabled, kvGet, kvSet } from "./kv";
 import type { Pair } from "./types";
 
 /**
@@ -8,11 +9,9 @@ import type { Pair } from "./types";
  * At most 10 MARKET WATCH posts per 24h => one every 2.4 hours. High-priority
  * SIGNALs bypass this entirely and can fire at any hour.
  *
- * Same read-only-filesystem caveat as lib/v5/store.ts: on Vercel we can only
- * write /tmp, which is per-instance and ephemeral. A cold start therefore
- * resets the budget, so the real-world cap is "at most 10/day per warm
- * instance", not a hard global guarantee. Move this to Vercel KV for a strict
- * cap — `readBudget`/`writeBudget` are the only two functions to swap.
+ * Durable via Vercel KV (V5.6), so the cap is now a real global 10/day rather
+ * than 10 per warm instance — a cold start no longer resets it. Falls back to
+ * the local filesystem when KV is not configured, so dev works unchanged.
  */
 
 export const CHART_POST_INTERVAL_MS = 8_640_000; // 2.4h => 10 posts / 24h
@@ -30,27 +29,42 @@ export type ChartBudget = {
 
 const EMPTY: ChartBudget = { lastPost: null, lastPair: null };
 
+function normalise(raw: unknown): ChartBudget | null {
+  if (!raw || typeof raw !== "object") return null;
+  const b = raw as Partial<ChartBudget>;
+  return {
+    lastPost: typeof b.lastPost === "string" ? b.lastPost : null,
+    lastPair: b.lastPair ?? null,
+  };
+}
+
 export async function readBudget(): Promise<ChartBudget> {
+  if (kvEnabled()) {
+    const fromKv = normalise(await kvGet<unknown>(KV_KEYS.chartBudget));
+    if (fromKv) return fromKv;
+  }
   try {
-    const parsed = JSON.parse(await fs.readFile(FILE, "utf8")) as ChartBudget;
-    return {
-      lastPost: typeof parsed.lastPost === "string" ? parsed.lastPost : null,
-      lastPair: parsed.lastPair ?? null,
-    };
+    return normalise(JSON.parse(await fs.readFile(FILE, "utf8"))) ?? EMPTY;
   } catch {
     return EMPTY;
   }
 }
 
 export async function writeBudget(budget: ChartBudget): Promise<boolean> {
+  const wroteKv = await kvSet(KV_KEYS.chartBudget, budget);
+  let wroteFile = false;
   try {
     await fs.mkdir(path.dirname(FILE), { recursive: true });
     await fs.writeFile(FILE, JSON.stringify(budget, null, 2), "utf8");
-    return true;
-  } catch (err) {
-    console.error("[v5/chart_budget] write failed:", (err as Error).message);
+    wroteFile = true;
+  } catch {
+    // read-only filesystem outside /tmp on Vercel — expected
+  }
+  if (!wroteKv && !wroteFile) {
+    console.error("[v5/chart_budget] write failed on every backend");
     return false;
   }
+  return true;
 }
 
 export type ChartGate =
