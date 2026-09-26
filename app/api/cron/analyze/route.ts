@@ -3,7 +3,13 @@ import { analysePair, VISION_MODEL } from "@/lib/v5/analyst";
 import { appendRows, readHistory, saveRows, storageBackend } from "@/lib/v5/store";
 import { getStats, settlePending } from "@/lib/v5/outcome_tracker";
 import { lastFailures } from "@/lib/v5/market_data";
-import { channelsConfigured, sendMarketWatch, sendSignal } from "@/lib/telegram_v5";
+import {
+  channelsConfigured,
+  sendMarketWatch,
+  sendSignal,
+  signalText,
+  vipSignalText,
+} from "@/lib/telegram_v5";
 import {
   MIN_CHART_CONFIDENCE,
   evaluateChartGate,
@@ -13,10 +19,12 @@ import {
 import {
   PAIRS,
   SEND_THRESHOLD,
+  type Action,
   type Analysis,
   type Pair,
   type TradeRecord,
 } from "@/lib/v5/types";
+import { fetchSpot } from "@/lib/v5/market_data";
 
 /**
  * VISION MTF V5.6 — analysis cron (dual-channel, anti-spam, outcome tracking).
@@ -60,11 +68,86 @@ type Evaluated = {
   tradable: boolean;
 };
 
+/**
+ * Dry run: ?dry=1&force=BUY[&pair=XAUUSD]
+ *
+ * Forces a high-confidence signal past the threshold and delivers it to BOTH
+ * channels so the real SIGNAL format can be eyeballed. Levels are derived
+ * from the live price so the message looks genuine.
+ *
+ * Writes NOTHING: no KV, no history, no chart-budget consumption.
+ * Sits behind the same CRON_SECRET guard as the normal cron.
+ */
+async function handleDryRun(params: URLSearchParams): Promise<Response> {
+  const forced = (params.get("force") ?? "BUY").toUpperCase();
+  const action: Action = forced === "SELL" ? "SELL" : "BUY";
+  const pairParam = (params.get("pair") ?? "XAUUSD").toUpperCase();
+  const pair: Pair = pairParam === "BTCUSD" ? "BTCUSD" : "XAUUSD";
+
+  const spot = await fetchSpot(pair);
+  const price = spot?.price ?? (pair === "XAUUSD" ? 4350 : 84000);
+
+  // stop ~1.2% (XAU) / 2% (BTC) away, TP1 at 2R and TP2 at 2.8R —
+  // realistic geometry anchored to the live price
+  const risk = pair === "XAUUSD" ? price * 0.012 : price * 0.02;
+  const dir = action === "BUY" ? 1 : -1;
+  const r2 = (n: number) => Math.round(n * 100) / 100;
+
+  const analysis: Analysis = {
+    pair,
+    action,
+    confidence: 88,
+    score_breakdown: { W: 22, D: 21, "4H": 17, H1: 14, "15M": 14 },
+    reason_taglish:
+      "DRY RUN lang ito - hindi totoong signal. Ginagamit para i-check ang format ng mensahe sa dalawang channel.",
+    session: "London",
+    sl: r2(price - dir * risk),
+    tp1: r2(price + dir * risk * 2),
+    tp2: r2(price + dir * risk * 2.8),
+  };
+
+  const threshold = SEND_THRESHOLD[pair];
+  let res;
+  try {
+    res = await sendSignal(analysis, r2(price), threshold);
+  } catch (err) {
+    return NextResponse.json(
+      { dry: true, ok: false, error: (err as Error).message },
+      { status: 500 }
+    );
+  }
+
+  return NextResponse.json({
+    dry: true,
+    saved_to_kv: false,
+    type: "SIGNAL",
+    pair,
+    action,
+    confidence: analysis.confidence,
+    threshold,
+    price: r2(price),
+    delivered_public: res.deliveredPublic,
+    delivered_vip: res.deliveredVip,
+    channels: channelsConfigured(),
+    detail: res.channels,
+    caption_preview: {
+      public: signalText(analysis, r2(price), threshold),
+      vip: vipSignalText(analysis, r2(price), threshold),
+    },
+  });
+}
+
 async function handle(req: Request) {
   const now = new Date();
+  const params = new URL(req.url).searchParams;
 
   if (!authorised(req)) {
     return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 });
+  }
+
+  // Authorised above, so the dry run inherits the CRON_SECRET guard.
+  if (params.get("dry") === "1") {
+    return handleDryRun(params);
   }
 
   // ---- 1. analyse both pairs -------------------------------------------
@@ -109,11 +192,17 @@ async function handle(req: Request) {
     if (e.tradable) {
       // ---- SIGNAL MODE — PUBLIC + VIP, bypasses the chart budget ----
       mode = "SIGNAL";
-      const res = await sendSignal(analysis, e.spot, SEND_THRESHOLD[pair]);
-      delivered = res.ok;
-      deliveredPublic = res.deliveredPublic;
-      deliveredVip = res.deliveredVip;
-      detail = res;
+      try {
+        const res = await sendSignal(analysis, e.spot, SEND_THRESHOLD[pair]);
+        delivered = res.ok;
+        deliveredPublic = res.deliveredPublic;
+        deliveredVip = res.deliveredVip;
+        detail = res;
+      } catch (err) {
+        // never let a delivery failure block the KV save below
+        detail = { error: (err as Error).message };
+        console.error(`[cron] ${pair} signal send threw:`, (err as Error).message);
+      }
     } else {
       // ---- CHART UPDATE MODE — budgeted ----
       const otherEligible = chartCandidates.some((c) => c.pair !== pair);
@@ -130,13 +219,18 @@ async function handle(req: Request) {
       if (gate.allowed) {
         // ---- CHART UPDATE — PUBLIC only, never VIP ----
         mode = "CHART_UPDATE";
-        const res = await sendMarketWatch(analysis);
-        delivered = res.ok;
-        deliveredPublic = res.deliveredPublic;
-        deliveredVip = false;
-        detail = res;
-        // one chart slot per run, even if both pairs qualify
-        if (res.ok) chartSlotTaken = true;
+        try {
+          const res = await sendMarketWatch(analysis);
+          delivered = res.ok;
+          deliveredPublic = res.deliveredPublic;
+          deliveredVip = false;
+          detail = res;
+          // one chart slot per run, even if both pairs qualify
+          if (res.ok) chartSlotTaken = true;
+        } catch (err) {
+          detail = { error: (err as Error).message };
+          console.error(`[cron] ${pair} market watch threw:`, (err as Error).message);
+        }
       } else {
         detail = gate;
       }
@@ -194,7 +288,7 @@ async function handle(req: Request) {
 
   return NextResponse.json({
     ok: true,
-    version: "5.6",
+    version: "5.6.1",
     model: VISION_MODEL,
     ranAt: now.toISOString(),
     mock: records.every((r) => r.mock),

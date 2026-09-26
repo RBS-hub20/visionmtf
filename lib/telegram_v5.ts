@@ -1,6 +1,7 @@
 import { buildCollage } from "./v5/charts";
 import { canPostChart, recordChartPost } from "./v5/chart_budget";
-import { TFS, type Analysis, type Pair } from "./v5/types";
+import { TFS, TF_WEIGHT, type Analysis, type Pair } from "./v5/types";
+import { formatPrice } from "./v5/market_data";
 
 /**
  * VISION MTF V5.6 — dual-channel Telegram delivery.
@@ -50,11 +51,17 @@ function chatFor(channel: Channel): string | null {
 }
 
 export function channelsConfigured() {
-  return {
+  const state = {
     bot: Boolean(token()),
     public: Boolean(chatFor("public")),
     vip: Boolean(chatFor("vip")),
   };
+  if (!state.bot || !state.public) {
+    console.warn(
+      `[telegram_v5] telegram not configured (bot=${state.bot} public=${state.public} vip=${state.vip}) - sends will be skipped`
+    );
+  }
+  return state;
 }
 
 function scoreLine(a: Analysis) {
@@ -67,6 +74,8 @@ function confidenceDot(confidence: number, threshold: number) {
   return "\u{1F534}";
 }
 
+const DASH = "\u2014";
+
 const fmt = (n: number | null) => (n === null || !Number.isFinite(n) ? "—" : String(n));
 
 /* ------------------------------------------------------------------ */
@@ -74,13 +83,18 @@ const fmt = (n: number | null) => (n === null || !Number.isFinite(n) ? "—" : S
 /* ------------------------------------------------------------------ */
 
 export function signalText(a: Analysis, price: number | null, threshold: number) {
+  const money = (v: number | null) =>
+    v === null || !Number.isFinite(v) ? DASH : formatPrice(a.pair, v);
   return [
-    `\u{1F680} VISION MTF V5 SIGNAL - ${a.pair}`,
+    `\u{1F3AF} ${a.pair} ${a.action}`,
     ``,
-    `${a.action} ${a.pair} @ ${fmt(price)}`,
-    `SL: ${fmt(a.sl)}   TP1: ${fmt(a.tp1)}   TP2: ${fmt(a.tp2)}`,
-    `SCORE: ${a.confidence}/100 ${confidenceDot(a.confidence, threshold)}`,
-    `MTF: ${scoreLine(a)}`,
+    `Entry : ${money(price)}`,
+    `SL    : ${money(a.sl)}`,
+    `TP1   : ${money(a.tp1)}`,
+    `TP2   : ${money(a.tp2)}`,
+    `R     : ${riskReward(price, a.sl, a.tp1)}`,
+    ``,
+    `Confidence: ${a.confidence}% ${confidenceDot(a.confidence, threshold)}`,
     `Session: ${a.session}`,
     ``,
     `AI: ${a.reason_taglish}`,
@@ -101,7 +115,6 @@ export function marketWatchText(a: Analysis) {
   ].join("\n");
 }
 
-/** @deprecated V5.2 replaced this with sendMarketWatch (rate limited to 10/day). */
 export function noTradeText(a: Analysis) {
   return [
     `⏳ VISION MTF - NO TRADE UPDATE`,
@@ -217,28 +230,32 @@ export function vipSignalText(
   price: number | null,
   threshold: number
 ) {
+  const money = (v: number | null) =>
+    v === null || !Number.isFinite(v) ? DASH : formatPrice(a.pair, v);
+  const total = TFS.reduce((sum, tf) => sum + (a.score_breakdown[tf] ?? 0), 0);
+  const breakdown = TFS.map(
+    (tf) => `${tf.padEnd(3)} : ${a.score_breakdown[tf] ?? 0}/${TF_WEIGHT[tf]}`
+  );
   return [
-    `\u{1F512} VIP SIGNAL - ${a.pair}`,
+    `\u{1F512} VIP SIGNAL - ${a.pair} ${a.action}`,
     ``,
-    `${a.action} ${a.pair} @ ${fmt(price)}`,
-    ``,
-    `Entry : ${fmt(price ?? null)}`,
-    `SL    : ${fmt(a.sl)}`,
-    `TP1   : ${fmt(a.tp1)}`,
-    `TP2   : ${fmt(a.tp2)}`,
+    `Entry : ${money(price)}`,
+    `SL    : ${money(a.sl)}`,
+    `TP1   : ${money(a.tp1)}`,
+    `TP2   : ${money(a.tp2)}`,
     `R     : ${riskReward(price, a.sl, a.tp1)}`,
     ``,
-    `SCORE: ${a.confidence}/100 ${confidenceDot(a.confidence, threshold)}`,
-    `MTF: ${scoreLine(a)}`,
-    `Session: ${a.session}`,
+    `MTF BREAKDOWN`,
+    ...breakdown,
+    `TOTAL : ${total}/100 ${confidenceDot(a.confidence, threshold)}`,
     ``,
+    `Session: ${a.session}`,
     `AI: ${a.reason_taglish}`,
     ``,
     `Risk 1% max. Move SL to break-even at 1R.`,
   ].join("\n");
 }
 
-/** "1 : 2.8" from entry/SL/TP, or an em dash when levels are missing. */
 export function riskReward(
   entry: number | null,
   sl: number | null,
