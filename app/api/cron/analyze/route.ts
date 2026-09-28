@@ -25,6 +25,7 @@ import {
   type TradeRecord,
 } from "@/lib/v5/types";
 import { fetchSpot } from "@/lib/v5/market_data";
+import { MOMENTUM_THRESHOLD, type MomentumResult } from "@/lib/v5/momentum";
 
 /**
  * VISION MTF V5.6 — analysis cron (dual-channel, anti-spam, outcome tracking).
@@ -64,6 +65,7 @@ type Evaluated = {
   charts: number;
   live: boolean;
   spot: number | null;
+  momentum?: MomentumResult;
   note?: string;
   tradable: boolean;
 };
@@ -93,17 +95,36 @@ async function handleDryRun(params: URLSearchParams): Promise<Response> {
   const dir = action === "BUY" ? 1 : -1;
   const r2 = (n: number) => Math.round(n * 100) / 100;
 
+  // ?momentum=0 shows the plain structural format instead
+  const withMomentum = params.get("momentum") !== "0";
+
   const analysis: Analysis = {
     pair,
     action,
-    confidence: 88,
-    score_breakdown: { W: 22, D: 21, "4H": 17, H1: 14, "15M": 14 },
+    confidence: withMomentum ? 86 : 88,
+    score_breakdown: withMomentum
+      ? { W: 18, D: 17, "4H": 14, H1: 10, "15M": 9 }
+      : { W: 22, D: 21, "4H": 17, H1: 14, "15M": 14 },
     reason_taglish:
       "DRY RUN lang ito - hindi totoong signal. Ginagamit para i-check ang format ng mensahe sa dalawang channel.",
     session: "London",
     sl: r2(price - dir * risk),
     tp1: r2(price + dir * risk * 2),
     tp2: r2(price + dir * risk * 2.8),
+    ...(withMomentum
+      ? {
+          momentum: {
+            direction: action,
+            score: 18,
+            reason:
+              action === "SELL"
+                ? "Premium zone + 2x bearish BOS sa 15M + wick rejection sa premium - maagang pasok bago mag-dump."
+                : "Discount zone + 2x bullish BOS sa 15M + wick rejection sa discount - maagang pasok bago mag-rally.",
+            triggers: ["double-bos", "wick-rejection"],
+            baseConfidence: 68,
+          },
+        }
+      : {}),
   };
 
   const threshold = SEND_THRESHOLD[pair];
@@ -153,7 +174,7 @@ async function handle(req: Request) {
   // ---- 1. analyse both pairs -------------------------------------------
   const evaluated: Evaluated[] = [];
   for (const pair of PAIRS as readonly Pair[]) {
-    const { analysis, mock, charts, note, live, spot } = await analysePair(pair, now);
+    const { analysis, mock, charts, note, live, spot, momentum } = await analysePair(pair, now);
     evaluated.push({
       pair,
       analysis,
@@ -161,9 +182,15 @@ async function handle(req: Request) {
       charts,
       live,
       spot: spot?.price ?? null,
+      momentum,
       note,
+      // Momentum entries clear a lower bar (80) than structural ones (85/90):
+      // they are early by design and cap out at 88, so the normal threshold
+      // would make them almost unreachable.
       tradable:
-        analysis.action !== "WAIT" && analysis.confidence >= SEND_THRESHOLD[pair],
+        analysis.action !== "WAIT" &&
+        analysis.confidence >=
+          (analysis.momentum ? MOMENTUM_THRESHOLD : SEND_THRESHOLD[pair]),
     });
   }
 
@@ -274,6 +301,15 @@ async function handle(req: Request) {
       charts: e.charts,
       liveCandles: e.live,
       price: e.spot,
+      momentum: e.momentum
+        ? {
+            direction: e.momentum.direction,
+            score: e.momentum.momentumScore,
+            triggers: e.momentum.triggers,
+            zone: e.momentum.detail.zoneLabel,
+            gateFailed: e.momentum.detail.gateFailed,
+          }
+        : null,
       mock: e.mock,
       ...(e.live ? {} : { feedErrors: lastFailures(pair) }),
       ...(e.note ? { note: e.note } : {}),
@@ -288,7 +324,7 @@ async function handle(req: Request) {
 
   return NextResponse.json({
     ok: true,
-    version: "5.6.1",
+    version: "5.6.2",
     model: VISION_MODEL,
     ranAt: now.toISOString(),
     mock: records.every((r) => r.mock),

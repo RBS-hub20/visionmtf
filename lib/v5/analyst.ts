@@ -1,6 +1,13 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { loadChartSet } from "./charts";
-import { formatPrice, type Spot } from "./market_data";
+import { fetchCandles, formatPrice, type Candle, type Spot } from "./market_data";
+import {
+  MOMENTUM_MAX_CONFIDENCE,
+  detectMomentum,
+  momentumLevels,
+  type MomentumResult,
+  type Series,
+} from "./momentum";
 import {
   TFS,
   breakdownTotal,
@@ -49,8 +56,70 @@ export type AnalysisOutcome = {
   charts: number;
   live: boolean;
   spot: Spot | null;
+  momentum?: MomentumResult;
   note?: string;
 };
+
+/**
+ * Fold momentum into a vision result.
+ *
+ * The model is conservative and holds WAIT through fast moves because no clean
+ * retracement has printed. When the numeric gates all pass we promote that WAIT
+ * into a directional call and add the bonus, capped at 88 — never 100, because
+ * this is an early entry without structural confirmation.
+ *
+ * Momentum that disagrees with an existing directional call is ignored rather
+ * than allowed to flip it: the model saw structure we did not.
+ */
+export function applyMomentum(
+  analysis: Analysis,
+  momentum: MomentumResult,
+  price: number | null
+): Analysis {
+  if (momentum.direction === "NONE" || momentum.momentumScore <= 0) return analysis;
+  if (analysis.action !== "WAIT" && analysis.action !== momentum.direction) {
+    return analysis;
+  }
+
+  const baseConfidence = analysis.confidence;
+  const confidence = Math.min(
+    MOMENTUM_MAX_CONFIDENCE,
+    baseConfidence + momentum.momentumScore
+  );
+
+  const levels =
+    analysis.sl !== null && analysis.tp1 !== null
+      ? { sl: analysis.sl, tp1: analysis.tp1, tp2: analysis.tp2 }
+      : price !== null
+        ? momentumLevels(price, momentum.direction, momentum.detail.atr, analysis.pair)
+        : { sl: null, tp1: null, tp2: null };
+
+  return {
+    ...analysis,
+    action: momentum.direction,
+    confidence,
+    ...levels,
+    momentum: {
+      direction: momentum.direction,
+      score: momentum.momentumScore,
+      reason: momentum.reason,
+      triggers: momentum.triggers,
+      baseConfidence,
+    },
+  };
+}
+
+/** Pull the five timeframes as raw candles for the momentum maths. */
+export async function loadSeries(pair: Pair): Promise<Series> {
+  const out: Series = {};
+  await Promise.all(
+    TFS.map(async (tf) => {
+      const c = await fetchCandles(pair, tf).catch(() => null);
+      if (c && c.length) out[tf] = c as Candle[];
+    })
+  );
+  return out;
+}
 
 const num = (v: unknown): number | null => {
   const n = Number(v);
@@ -254,11 +323,20 @@ export async function analysePair(
       };
     }
 
-    return {
-      ...base,
-      analysis: coerceAnalysis(extractJson(text), pair, now),
-      mock: false,
-    };
+    const parsed = coerceAnalysis(extractJson(text), pair, now);
+
+    // Second opinion from the numbers — can promote a WAIT into a trade.
+    let momentum: MomentumResult | undefined;
+    let analysis = parsed;
+    try {
+      const series = await loadSeries(pair);
+      momentum = detectMomentum(pair, series, set.spot?.price ?? null);
+      analysis = applyMomentum(parsed, momentum, set.spot?.price ?? null);
+    } catch (err) {
+      console.error(`[v5/analyst] ${pair} momentum failed:`, (err as Error).message);
+    }
+
+    return { ...base, analysis, mock: false, momentum };
   } catch (err) {
     const message =
       err instanceof Anthropic.APIError

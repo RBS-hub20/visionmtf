@@ -20,6 +20,12 @@ export type Candle = {
   h: number;
   l: number;
   c: number;
+  /**
+   * Volume. 0 when the source does not report it — spot XAU/USD has no
+   * centralised volume, so TwelveData returns none for gold. Consumers must
+   * treat 0 as "unknown", never as "no trading".
+   */
+  v: number;
 };
 
 export const BARS = 100;
@@ -115,6 +121,7 @@ function parseKlines(rows: unknown[][]): Candle[] {
     h: Number(r[2]),
     l: Number(r[3]),
     c: Number(r[4]),
+    v: Number(r[5]) || 0,
   }));
 }
 
@@ -161,7 +168,13 @@ type YahooChart = {
           timestamp?: number[];
           meta?: { regularMarketPrice?: number };
           indicators: {
-            quote: { open?: (number | null)[]; high?: (number | null)[]; low?: (number | null)[]; close?: (number | null)[] }[];
+            quote: {
+              open?: (number | null)[];
+              high?: (number | null)[];
+              low?: (number | null)[];
+              close?: (number | null)[];
+              volume?: (number | null)[];
+            }[];
           };
         }[]
       | null;
@@ -189,6 +202,7 @@ function groupCandles(candles: Candle[], n: number): Candle[] {
     h: Math.max(...group.map((g: Candle) => g.h)),
     l: Math.min(...group.map((g: Candle) => g.l)),
     c: group[group.length - 1].c,
+    v: group.reduce((sum: number, g: Candle) => sum + g.v, 0),
   }));
 }
 
@@ -211,7 +225,7 @@ async function fetchYahoo(symbol: string, tf: Tf): Promise<Candle[]> {
     const c = q.close?.[i];
     // Yahoo returns nulls for non-trading slots — drop them
     if (o == null || h == null || l == null || c == null) continue;
-    out.push({ t: result.timestamp[i] * 1000, o, h, l, c });
+    out.push({ t: result.timestamp[i] * 1000, o, h, l, c, v: q.volume?.[i] ?? 0 });
   }
   const grouped = spec.groupBy ? groupCandles(out, spec.groupBy) : out;
   return grouped.slice(-BARS);
@@ -234,7 +248,14 @@ async function fetchTwelveData(tf: Tf, apiKey: string): Promise<Candle[]> {
   const data = (await getJson(url)) as {
     status?: string;
     message?: string;
-    values?: { datetime: string; open: string; high: string; low: string; close: string }[];
+    values?: {
+      datetime: string;
+      open: string;
+      high: string;
+      low: string;
+      close: string;
+      volume?: string;
+    }[];
   };
   if (data.status === "error" || !data.values) {
     throw new Error(data.message ?? "twelvedata error");
@@ -246,6 +267,7 @@ async function fetchTwelveData(tf: Tf, apiKey: string): Promise<Candle[]> {
       h: Number(v.high),
       l: Number(v.low),
       c: Number(v.close),
+      v: Number(v.volume ?? 0) || 0,
     }))
     .reverse(); // TwelveData returns newest first
 }

@@ -86,7 +86,9 @@ export function signalText(a: Analysis, price: number | null, threshold: number)
   const money = (v: number | null) =>
     v === null || !Number.isFinite(v) ? DASH : formatPrice(a.pair, v);
   return [
-    `\u{1F3AF} ${a.pair} ${a.action}`,
+    a.momentum
+      ? `\u26A1 MOMENTUM ${a.action} - ${a.pair}`
+      : `\u{1F3AF} ${a.pair} ${a.action}`,
     ``,
     `Entry : ${money(price)}`,
     `SL    : ${money(a.sl)}`,
@@ -97,6 +99,7 @@ export function signalText(a: Analysis, price: number | null, threshold: number)
     `Confidence: ${a.confidence}% ${confidenceDot(a.confidence, threshold)}`,
     `Session: ${a.session}`,
     ``,
+    ...(a.momentum ? [`\u26A1 ${a.momentum.reason}`, ``] : []),
     `AI: ${a.reason_taglish}`,
   ].join("\n");
 }
@@ -249,6 +252,17 @@ export function vipSignalText(
     ...breakdown,
     `TOTAL : ${total}/100 ${confidenceDot(a.confidence, threshold)}`,
     ``,
+    ...(a.momentum
+      ? [
+          `MOMENTUM DETECTED: ${a.momentum.direction}`,
+          `Base    : ${a.momentum.baseConfidence}/100 (vision read)`,
+          `Bonus   : +${a.momentum.score} (momentum)`,
+          `Final   : ${a.confidence}/100`,
+          `Triggers: ${a.momentum.triggers.join(", ")}`,
+          `${a.momentum.reason}`,
+          ``,
+        ]
+      : []),
     `Session: ${a.session}`,
     `AI: ${a.reason_taglish}`,
     ``,
@@ -277,7 +291,8 @@ export async function sendSignal(
   price: number | null,
   threshold: number
 ): Promise<SendResult> {
-  return broadcast(a.pair, `${a.action} ${a.pair} \u2014 ${a.confidence}/100`, {
+  const tag = a.momentum ? "MOMENTUM " : "";
+  return broadcast(a.pair, `${tag}${a.action} ${a.pair} \u2014 ${a.confidence}/100`, {
     public: signalText(a, price, threshold),
     vip: vipSignalText(a, price, threshold),
   });

@@ -56,6 +56,15 @@ export type Analysis = {
   sl: number | null;
   tp1: number | null;
   tp2: number | null;
+  /** Set when V5.6.2 momentum detection promoted or reinforced this call. */
+  momentum?: {
+    direction: "BUY" | "SELL";
+    score: number;
+    reason: string;
+    triggers: string[];
+    /** Base confidence from the vision model, before the bonus. */
+    baseConfidence: number;
+  };
 };
 
 export type SignalKind = "SIGNAL" | "WAIT_UPDATE" | "LOGGED";
