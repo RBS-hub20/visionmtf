@@ -20,6 +20,7 @@ export type MomentumDirection = "BUY" | "SELL" | "NONE";
 
 export type MomentumTrigger =
   | "double-bos"
+  | "single-bos"
   | "rsi-divergence"
   | "wick-rejection"
   | "aggressive-bodies";
@@ -43,7 +44,12 @@ export type MomentumResult = {
   };
 };
 
-export const MOMENTUM_THRESHOLD = 80;
+export const MOMENTUM_THRESHOLD = 65;
+
+/** Range-mode fade edges, and how far into a trend an entry is still allowed. */
+export const PREMIUM_EDGE = 0.65;
+export const DISCOUNT_EDGE = 0.35;
+export const TREND_ENTRY_FLOOR = 0.3;
 export const MOMENTUM_MAX_CONFIDENCE = 88;
 
 const body = (c: Candle) => Math.abs(c.c - c.o);
@@ -125,7 +131,8 @@ export function consecutiveBos(
   candles: Candle[],
   dir: "BUY" | "SELL",
   windowBars = 6,
-  swing = 2
+  swing = 2,
+  required = 2
 ): boolean {
   if (candles.length < swing * 2 + windowBars + 2) return false;
   const recent = candles.slice(-(windowBars + swing * 2 + 1));
@@ -143,7 +150,7 @@ export function consecutiveBos(
     if (broke && decisive && rightWay) {
       breaks++;
       level = dir === "SELL" ? Math.min(level, c.l) : Math.max(level, c.h);
-      if (breaks >= 2) return true;
+      if (breaks >= required) return true;
     }
   }
   return false;
@@ -199,7 +206,7 @@ export function aggressiveBodies(candles: Candle[], dir: "BUY" | "SELL"): boolea
   const last5 = candles.slice(-5);
   const strong = last5.filter((c) => {
     const rightWay = dir === "SELL" ? c.c < c.o : c.c > c.o;
-    return rightWay && body(c) / range(c) > 0.7;
+    return rightWay && body(c) / range(c) > 0.6;
   });
   return strong.length >= 3;
 }
@@ -295,6 +302,10 @@ const TAGLISH: Record<MomentumTrigger, { sell: string; buy: string }> = {
     sell: "2x bearish BOS sa 15M",
     buy: "2x bullish BOS sa 15M",
   },
+  "single-bos": {
+    sell: "bearish BOS sa 15M",
+    buy: "bullish BOS sa 15M",
+  },
   "rsi-divergence": {
     sell: "bearish RSI divergence",
     buy: "bullish RSI divergence",
@@ -352,41 +363,80 @@ export function detectMomentum(
   }
   if (zone === null) return empty({ ...base, gateFailed: "no zone reference" });
 
-  // Direction follows the Daily, it does not fade it. Measured over 940 bars
-  // of real gold, fading the trend fired 82 times at a 41% right-direction
-  // rate and a -$3.81 average; following it fired on the dump instead.
+  // Two regimes, because one rule cannot serve both.
+  //
+  // TRENDING: follow the Daily, never fade it. Measured over 940 bars of real
+  // gold, fading the trend fired 82 times at a 41% right-direction rate and a
+  // -$3.81 average; following it caught the dump instead.
+  //
+  // RANGING: there is no trend to follow, and that is precisely when
+  // premium/discount mean reversion is the correct model — fade the extremes.
+  // Without this branch BTCUSD was blocked on every one of the last 192 bars
+  // with "daily has no clear bias", so momentum could never fire on a ranging
+  // market at any threshold.
+  let dir: MomentumDirection;
   if (bias === "range") {
-    return empty({ ...base, gateFailed: "daily has no clear bias" });
-  }
-  const dir: MomentumDirection = bias === "down" ? "SELL" : "BUY";
+    if (zone >= PREMIUM_EDGE) dir = "SELL";
+    else if (zone <= DISCOUNT_EDGE) dir = "BUY";
+    else {
+      return empty({
+        ...base,
+        gateFailed: "ranging but price mid-range, no edge to fade",
+      });
+    }
+  } else {
+    dir = bias === "down" ? "SELL" : "BUY";
 
-  // Enter on a pullback inside the trend, not at the exhausted end of it.
-  if (dir === "SELL" && zone < 0.35) {
-    return empty({ ...base, gateFailed: "already at the lows, too late to sell" });
-  }
-  if (dir === "BUY" && zone > 0.65) {
-    return empty({ ...base, gateFailed: "already at the highs, too late to buy" });
+    // Enter on a pullback inside the trend, not at the exhausted end of it.
+    if (dir === "SELL" && zone < TREND_ENTRY_FLOOR) {
+      return empty({ ...base, gateFailed: "already at the lows, too late to sell" });
+    }
+    if (dir === "BUY" && zone > 1 - TREND_ENTRY_FLOOR) {
+      return empty({ ...base, gateFailed: "already at the highs, too late to buy" });
+    }
   }
 
   const triggers: MomentumTrigger[] = [];
-  if (consecutiveBos(m15, dir)) triggers.push("double-bos");
+  const doubleBos = consecutiveBos(m15, dir, 6, 2, 2);
+  const singleBos = doubleBos || consecutiveBos(m15, dir, 6, 2, 1);
+  if (doubleBos) triggers.push("double-bos");
+  else if (singleBos) triggers.push("single-bos");
   if (rsiDivergence(h1, dir) || rsiDivergence(h4, dir)) triggers.push("rsi-divergence");
   const wick = wickRejection(h1, dir);
   if (wick.hit) triggers.push("wick-rejection");
   if (aggressiveBodies(m15, dir)) triggers.push("aggressive-bodies");
 
-  if (triggers.length === 0) {
-    return empty({ ...base, gateFailed: "no momentum trigger fired" });
+  // A lone single BOS is not enough on its own — it needs corroboration.
+  const onlyWeakTrigger =
+    triggers.length === 1 && triggers[0] === "single-bos";
+  if (triggers.length === 0 || onlyWeakTrigger) {
+    return empty({
+      ...base,
+      gateFailed:
+        triggers.length === 0
+          ? "no momentum trigger fired"
+          : "single BOS with no corroborating trigger",
+    });
   }
 
-  // Compression is context, not a veto: as a hard gate it suppressed every
-  // signal in the sample, so it contributes confidence instead.
+  // Range mode demands the strong tier. Measured over 400 bars of BTCUSD:
+  // allowing the weak tier while ranging fired 231 times at 58% and +$77,
+  // versus 20 fires at 80% and +$420 when double BOS is required. Fading a
+  // range without a decisive structural break is mostly noise.
+  if (bias === "range" && !doubleBos) {
+    return empty({ ...base, gateFailed: "ranging without a double BOS" });
+  }
+
+  // Double BOS is the strong tier (18 base); a single BOS backed by another
+  // trigger is the weaker tier (12 base). Compression is context, not a veto:
+  // as a hard gate it suppressed every signal in the sample.
+  const strongTier = doubleBos;
   const score = Math.min(
     20,
-    12 +
-      (triggers.length - 1) * 3 +
-      (base.choppy4h ? 2 : 0) +
-      (base.flatH1 ? 2 : 0) +
+    (strongTier ? 18 : 12) +
+      (triggers.length - 1) * 2 +
+      (base.choppy4h ? 1 : 0) +
+      (base.flatH1 ? 1 : 0) +
       (wick.withVolume ? 2 : 0)
   );
 

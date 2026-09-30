@@ -33,8 +33,8 @@ export const TF_WEIGHT: Record<Tf, number> = {
 
 /** Minimum confidence required before a signal is broadcast. */
 export const SEND_THRESHOLD: Record<Pair, number> = {
-  XAUUSD: 85,
-  BTCUSD: 90,
+  XAUUSD: 75,
+  BTCUSD: 80,
 };
 
 /** How often a WAIT state is re-broadcast, in milliseconds. */
