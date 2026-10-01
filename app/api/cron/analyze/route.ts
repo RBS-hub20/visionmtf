@@ -301,13 +301,25 @@ async function handle(req: Request) {
       charts: e.charts,
       liveCandles: e.live,
       price: e.spot,
-      momentum: e.momentum
+      momentum_debug: e.momentum
         ? {
+            regime: e.momentum.detail.regime ?? "unknown",
+            gates_passed: e.momentum.direction !== "NONE",
+            rejection_reason: e.momentum.detail.gateFailed ?? null,
             direction: e.momentum.direction,
-            score: e.momentum.momentumScore,
-            triggers: e.momentum.triggers,
-            zone: e.momentum.detail.zoneLabel,
-            gateFailed: e.momentum.detail.gateFailed,
+            base_score: analysis.momentum?.baseConfidence ?? analysis.confidence,
+            bonus: e.momentum.momentumScore,
+            final: analysis.confidence,
+            threshold: analysis.momentum ? MOMENTUM_THRESHOLD : SEND_THRESHOLD[pair],
+            triggers_fired: e.momentum.triggers,
+            triggers_checked: e.momentum.detail.triggersChecked ?? null,
+            zone: e.momentum.detail.zone,
+            zone_label: e.momentum.detail.zoneLabel,
+            daily_bias: e.momentum.detail.dailyBias,
+            choppy_4h: e.momentum.detail.choppy4h,
+            flat_h1: e.momentum.detail.flatH1,
+            exhausted_fade: e.momentum.detail.exhausted ?? false,
+            volume_available: e.momentum.detail.volumeAvailable,
           }
         : null,
       mock: e.mock,
@@ -324,7 +336,7 @@ async function handle(req: Request) {
 
   return NextResponse.json({
     ok: true,
-    version: "5.6.2",
+    version: "5.6.4",
     model: VISION_MODEL,
     ranAt: now.toISOString(),
     mock: records.every((r) => r.mock),

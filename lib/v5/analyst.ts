@@ -3,7 +3,7 @@ import { loadChartSet } from "./charts";
 import { fetchCandles, formatPrice, type Candle, type Spot } from "./market_data";
 import {
   MOMENTUM_MAX_CONFIDENCE,
-  detectMomentum,
+  detectMomentumWindow,
   momentumLevels,
   type MomentumResult,
   type Series,
@@ -330,7 +330,7 @@ export async function analysePair(
     let analysis = parsed;
     try {
       const series = await loadSeries(pair);
-      momentum = detectMomentum(pair, series, set.spot?.price ?? null);
+      momentum = detectMomentumWindow(pair, series, set.spot?.price ?? null);
       analysis = applyMomentum(parsed, momentum, set.spot?.price ?? null);
     } catch (err) {
       console.error(`[v5/analyst] ${pair} momentum failed:`, (err as Error).message);

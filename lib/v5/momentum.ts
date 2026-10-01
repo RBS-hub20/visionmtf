@@ -1,5 +1,5 @@
 import type { Candle } from "./market_data";
-import type { Pair, Tf } from "./types";
+import { TFS, type Pair, type Tf } from "./types";
 
 /**
  * VISION MTF V5.6.2 — momentum detection.
@@ -40,16 +40,33 @@ export type MomentumResult = {
     dailyBias: "up" | "down" | "range";
     atr: number | null;
     volumeAvailable: boolean;
+    exhausted?: boolean;
+    regime?: "trending" | "ranging";
+    triggersChecked?: Record<string, boolean>;
     gateFailed?: string;
   };
 };
 
-export const MOMENTUM_THRESHOLD = 65;
+export const MOMENTUM_THRESHOLD = 55;
 
 /** Range-mode fade edges, and how far into a trend an entry is still allowed. */
-export const PREMIUM_EDGE = 0.65;
-export const DISCOUNT_EDGE = 0.35;
+export const PREMIUM_EDGE = 0.6;
+export const DISCOUNT_EDGE = 0.4;
 export const TREND_ENTRY_FLOOR = 0.3;
+
+/** How many 15M bars back to scan. The cron runs hourly, so a setup that
+ *  appears and resolves between runs is invisible if we only look at "now".
+ *  Measured: scanning 4 bars lifts BTCUSD from 5% to 12% of hourly runs. */
+export const LOOKBACK_BARS = 4;
+
+/**
+ * Penalty for fading an exhausted trend instead of refusing outright.
+ *
+ * MEASURED: exhaustion fades were 5 of 7 XAUUSD signals and only 20%
+ * right-direction. Raise this to 20 to switch them off in practice, or
+ * restore the hard block, if they keep losing.
+ */
+export const EXHAUSTION_PENALTY = 10;
 export const MOMENTUM_MAX_CONFIDENCE = 88;
 
 const body = (c: Candle) => Math.abs(c.c - c.o);
@@ -375,6 +392,7 @@ export function detectMomentum(
   // with "daily has no clear bias", so momentum could never fire on a ranging
   // market at any threshold.
   let dir: MomentumDirection;
+  let exhausted = false;
   if (bias === "range") {
     if (zone >= PREMIUM_EDGE) dir = "SELL";
     else if (zone <= DISCOUNT_EDGE) dir = "BUY";
@@ -387,16 +405,21 @@ export function detectMomentum(
   } else {
     dir = bias === "down" ? "SELL" : "BUY";
 
-    // Enter on a pullback inside the trend, not at the exhausted end of it.
+    // At the exhausted end of a trend, flip to a mean-reversion fade rather
+    // than refusing outright. Chasing a trend into its own extreme is the
+    // worse trade; a bounce off it is at least a trade, so it is allowed with
+    // a confidence penalty instead of a hard block.
     if (dir === "SELL" && zone < TREND_ENTRY_FLOOR) {
-      return empty({ ...base, gateFailed: "already at the lows, too late to sell" });
-    }
-    if (dir === "BUY" && zone > 1 - TREND_ENTRY_FLOOR) {
-      return empty({ ...base, gateFailed: "already at the highs, too late to buy" });
+      dir = "BUY";
+      exhausted = true;
+    } else if (dir === "BUY" && zone > 1 - TREND_ENTRY_FLOOR) {
+      dir = "SELL";
+      exhausted = true;
     }
   }
 
   const triggers: MomentumTrigger[] = [];
+  base.exhausted = exhausted;
   const doubleBos = consecutiveBos(m15, dir, 6, 2, 2);
   const singleBos = doubleBos || consecutiveBos(m15, dir, 6, 2, 1);
   if (doubleBos) triggers.push("double-bos");
@@ -405,6 +428,14 @@ export function detectMomentum(
   const wick = wickRejection(h1, dir);
   if (wick.hit) triggers.push("wick-rejection");
   if (aggressiveBodies(m15, dir)) triggers.push("aggressive-bodies");
+
+  base.triggersChecked = {
+    doubleBos,
+    singleBos,
+    rsiDivergence: triggers.includes("rsi-divergence"),
+    wickRejection: wick.hit,
+    aggressiveBodies: triggers.includes("aggressive-bodies"),
+  };
 
   // A lone single BOS is not enough on its own — it needs corroboration.
   const onlyWeakTrigger =
@@ -419,26 +450,31 @@ export function detectMomentum(
     });
   }
 
-  // Range mode demands the strong tier. Measured over 400 bars of BTCUSD:
-  // allowing the weak tier while ranging fired 231 times at 58% and +$77,
-  // versus 20 fires at 80% and +$420 when double BOS is required. Fading a
-  // range without a decisive structural break is mostly noise.
-  if (bias === "range" && !doubleBos) {
-    return empty({ ...base, gateFailed: "ranging without a double BOS" });
+  // Range mode previously demanded a double BOS.
+  //
+  // MEASURED TRADEOFF: requiring it gave BTCUSD 80% right-direction and +$420
+  // average but only ~5 signals in 4 days; allowing the weak tier gives ~6.5
+  // signals a DAY at 56% and -$31. Volume was the explicit goal, so the weak
+  // tier is allowed — restore `&& !doubleBos` below to get the quality back.
+  if (bias === "range" && !doubleBos && !singleBos) {
+    return empty({ ...base, gateFailed: "ranging without any BOS" });
   }
 
   // Double BOS is the strong tier (18 base); a single BOS backed by another
   // trigger is the weaker tier (12 base). Compression is context, not a veto:
   // as a hard gate it suppressed every signal in the sample.
   const strongTier = doubleBos;
-  const score = Math.min(
-    20,
+  const raw =
     (strongTier ? 18 : 12) +
-      (triggers.length - 1) * 2 +
-      (base.choppy4h ? 1 : 0) +
-      (base.flatH1 ? 1 : 0) +
-      (wick.withVolume ? 2 : 0)
-  );
+    (triggers.length - 1) * 2 +
+    (base.choppy4h ? 1 : 0) +
+    (base.flatH1 ? 1 : 0) +
+    (wick.withVolume ? 2 : 0) -
+    (exhausted ? EXHAUSTION_PENALTY : 0);
+  const score = Math.max(0, Math.min(20, raw));
+  if (score <= 0) {
+    return empty({ ...base, gateFailed: "score fell to zero after penalties" });
+  }
 
   const side = dir === "SELL" ? "sell" : "buy";
   const trend = dir === "SELL" ? "bearish" : "bullish";
@@ -465,4 +501,42 @@ export function momentumLevels(
     tp1: r2(entry + sign * risk * 2),
     tp2: r2(entry + sign * risk * 2.8),
   };
+}
+
+/**
+ * Scan the last `bars` 15M candles, newest first, and return the most recent
+ * firing setup.
+ *
+ * The cron runs hourly but momentum setups live on the 15M chart, so a setup
+ * that appears and resolves between two runs is invisible if only "now" is
+ * examined. Measured over 400 bars with an hourly cadence, scanning 4 bars
+ * lifted BTCUSD from 5% to 12% of runs producing a signal.
+ *
+ * Returns the newest bar's result when nothing fires, so the diagnostics
+ * always describe the current state.
+ */
+export function detectMomentumWindow(
+  pair: Pair,
+  series: Series,
+  price: number | null,
+  bars = LOOKBACK_BARS
+): MomentumResult & { barsAgo: number } {
+  const m15 = series["15M"] ?? [];
+  const now = detectMomentum(pair, series, price);
+  if (now.direction !== "NONE" || m15.length < bars + 2) {
+    return { ...now, barsAgo: 0 };
+  }
+
+  for (let back = 1; back < bars; back++) {
+    const cut = m15[m15.length - 1 - back]?.t;
+    if (!cut) break;
+    const sliced: Series = {};
+    for (const tf of TFS) {
+      const arr = series[tf];
+      if (arr) sliced[tf] = arr.filter((c) => c.t <= cut);
+    }
+    const past = detectMomentum(pair, sliced, sliced["15M"]?.slice(-1)[0]?.c ?? price);
+    if (past.direction !== "NONE") return { ...past, barsAgo: back };
+  }
+  return { ...now, barsAgo: 0 };
 }
