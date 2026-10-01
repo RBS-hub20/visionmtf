@@ -47,7 +47,7 @@ export type MomentumResult = {
   };
 };
 
-export const MOMENTUM_THRESHOLD = 55;
+export const MOMENTUM_THRESHOLD = 60;
 
 /** Range-mode fade edges, and how far into a trend an entry is still allowed. */
 export const PREMIUM_EDGE = 0.6;
@@ -62,11 +62,12 @@ export const LOOKBACK_BARS = 4;
 /**
  * Penalty for fading an exhausted trend instead of refusing outright.
  *
- * MEASURED: exhaustion fades were 5 of 7 XAUUSD signals and only 20%
- * right-direction. Raise this to 20 to switch them off in practice, or
- * restore the hard block, if they keep losing.
+ * MEASURED: at 10 these fades were 5 of 7 XAUUSD signals and only 20%
+ * right-direction — the weakest component by a wide margin. At 20 even a
+ * maximum-strength fade scores 8, which cannot clear MOMENTUM_THRESHOLD, so
+ * they are effectively off while the mechanism stays in place for tuning.
  */
-export const EXHAUSTION_PENALTY = 10;
+export const EXHAUSTION_PENALTY = 20;
 export const MOMENTUM_MAX_CONFIDENCE = 88;
 
 const body = (c: Candle) => Math.abs(c.c - c.o);
@@ -450,14 +451,14 @@ export function detectMomentum(
     });
   }
 
-  // Range mode previously demanded a double BOS.
+  // Range mode demands the strong tier; the weak tier is trending-only.
   //
-  // MEASURED TRADEOFF: requiring it gave BTCUSD 80% right-direction and +$420
-  // average but only ~5 signals in 4 days; allowing the weak tier gives ~6.5
-  // signals a DAY at 56% and -$31. Volume was the explicit goal, so the weak
-  // tier is allowed — restore `&& !doubleBos` below to get the quality back.
-  if (bias === "range" && !doubleBos && !singleBos) {
-    return empty({ ...base, gateFailed: "ranging without any BOS" });
+  // MEASURED: allowing a single BOS while ranging gave BTCUSD ~6.5 signals a
+  // day at 56% right-direction and -$31 average. Requiring the double BOS
+  // gave ~2.5 a day at 80% and +$420. Fading a range without a decisive
+  // structural break is mostly noise, so quality wins here.
+  if (bias === "range" && !doubleBos) {
+    return empty({ ...base, gateFailed: "ranging without a double BOS" });
   }
 
   // Double BOS is the strong tier (18 base); a single BOS backed by another
