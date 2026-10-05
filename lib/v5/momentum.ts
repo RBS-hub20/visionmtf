@@ -47,7 +47,23 @@ export type MomentumResult = {
   };
 };
 
-export const MOMENTUM_THRESHOLD = 60;
+export const MOMENTUM_THRESHOLD = 50;
+
+/**
+ * Auto-pass (V5.6.6 "Option B").
+ *
+ * When momentum fires on a base the vision model scored at least
+ * MOMENTUM_MIN_BASE, the final confidence is floored to AUTO_PASS_FLOOR so the
+ * setup clears SEND_THRESHOLD and publishes, even though base + bonus alone
+ * would fall short. The floor is cosmetic as well as functional: /live and the
+ * Telegram caption both show the floored number.
+ *
+ * This deliberately trades quality for volume — any momentum detection on a
+ * base of 35+ now becomes a signal.
+ */
+export const MOMENTUM_AUTO_PASS = true;
+export const MOMENTUM_MIN_BASE = 35;
+export const AUTO_PASS_FLOOR = 60;
 
 /** Range-mode fade edges, and how far into a trend an entry is still allowed. */
 export const PREMIUM_EDGE = 0.6;

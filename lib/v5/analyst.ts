@@ -2,7 +2,10 @@ import Anthropic from "@anthropic-ai/sdk";
 import { loadChartSet } from "./charts";
 import { fetchCandles, formatPrice, type Candle, type Spot } from "./market_data";
 import {
+  AUTO_PASS_FLOOR,
+  MOMENTUM_AUTO_PASS,
   MOMENTUM_MAX_CONFIDENCE,
+  MOMENTUM_MIN_BASE,
   detectMomentumWindow,
   momentumLevels,
   type MomentumResult,
@@ -82,10 +85,22 @@ export function applyMomentum(
   }
 
   const baseConfidence = analysis.confidence;
-  const confidence = Math.min(
+  let confidence = Math.min(
     MOMENTUM_MAX_CONFIDENCE,
     baseConfidence + momentum.momentumScore
   );
+
+  // Option B auto-pass: a fired momentum setup on a base of at least
+  // MOMENTUM_MIN_BASE is floored to AUTO_PASS_FLOOR so it publishes even when
+  // base + bonus falls a few points short. Still capped at
+  // MOMENTUM_MAX_CONFIDENCE, and a base below the minimum is left untouched.
+  const autoPassed =
+    MOMENTUM_AUTO_PASS &&
+    baseConfidence >= MOMENTUM_MIN_BASE &&
+    confidence < AUTO_PASS_FLOOR;
+  if (autoPassed) {
+    confidence = Math.min(MOMENTUM_MAX_CONFIDENCE, AUTO_PASS_FLOOR);
+  }
 
   const levels =
     analysis.sl !== null && analysis.tp1 !== null
@@ -105,6 +120,7 @@ export function applyMomentum(
       reason: momentum.reason,
       triggers: momentum.triggers,
       baseConfidence,
+      autoPassed,
     },
   };
 }

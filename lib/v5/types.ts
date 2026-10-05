@@ -33,8 +33,8 @@ export const TF_WEIGHT: Record<Tf, number> = {
 
 /** Minimum confidence required before a signal is broadcast. */
 export const SEND_THRESHOLD: Record<Pair, number> = {
-  XAUUSD: 65,
-  BTCUSD: 70,
+  XAUUSD: 60,
+  BTCUSD: 60,
 };
 
 /** How often a WAIT state is re-broadcast, in milliseconds. */
@@ -64,6 +64,8 @@ export type Analysis = {
     triggers: string[];
     /** Base confidence from the vision model, before the bonus. */
     baseConfidence: number;
+    /** True when the Option B floor lifted this over the send threshold. */
+    autoPassed?: boolean;
   };
 };
 
