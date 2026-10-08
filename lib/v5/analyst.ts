@@ -2,10 +2,8 @@ import Anthropic from "@anthropic-ai/sdk";
 import { loadChartSet } from "./charts";
 import { fetchCandles, formatPrice, type Candle, type Spot } from "./market_data";
 import {
-  AUTO_PASS_FLOOR,
-  MOMENTUM_AUTO_PASS,
+  AUTO_PASS_CONFIG,
   MOMENTUM_MAX_CONFIDENCE,
-  MOMENTUM_MIN_BASE,
   detectMomentumWindow,
   momentumLevels,
   type MomentumResult,
@@ -90,16 +88,22 @@ export function applyMomentum(
     baseConfidence + momentum.momentumScore
   );
 
-  // Option B auto-pass: a fired momentum setup on a base of at least
-  // MOMENTUM_MIN_BASE is floored to AUTO_PASS_FLOOR so it publishes even when
-  // base + bonus falls a few points short. Still capped at
-  // MOMENTUM_MAX_CONFIDENCE, and a base below the minimum is left untouched.
+  // Auto-pass floors a qualifying setup over the send threshold. Two guards:
+  //
+  //  - per-pair rules, because gold's auto-passed fades lost twice live while
+  //    BTC's auto-passed signal took TP1 for +1080.7 pips
+  //  - never an exhaustion fade. EXHAUSTION_PENALTY exists to hold those under
+  //    the threshold, and a floor that lifts them anyway silently cancels it.
+  //    That is exactly how the two gold losses were published.
+  const rule = AUTO_PASS_CONFIG[analysis.pair];
+  const isFade = momentum.detail.exhausted === true;
   const autoPassed =
-    MOMENTUM_AUTO_PASS &&
-    baseConfidence >= MOMENTUM_MIN_BASE &&
-    confidence < AUTO_PASS_FLOOR;
+    rule.enabled &&
+    !isFade &&
+    baseConfidence >= rule.minBase &&
+    confidence < rule.floor;
   if (autoPassed) {
-    confidence = Math.min(MOMENTUM_MAX_CONFIDENCE, AUTO_PASS_FLOOR);
+    confidence = Math.min(MOMENTUM_MAX_CONFIDENCE, rule.floor);
   }
 
   const levels =

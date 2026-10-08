@@ -61,6 +61,28 @@ export const MOMENTUM_THRESHOLD = 50;
  * This deliberately trades quality for volume — any momentum detection on a
  * base of 35+ now becomes a signal.
  */
+export type AutoPassRule = {
+  enabled: boolean;
+  minBase: number;
+  floor: number;
+};
+
+/**
+ * Per-pair auto-pass, tuned from LIVE outcomes rather than backtest.
+ *
+ * First three settled signals (V5.4 tracker):
+ *   07 Oct  BTCUSD SELL 75  TP1  +1080.7  WIN   (auto-passed)
+ *   06 Oct  XAUUSD BUY  65  SL    -187.2  LOSS  (auto-passed fade)
+ *   05 Oct  XAUUSD BUY  60  SL    -155.3  LOSS  (auto-passed fade)
+ *
+ * Gold auto-pass is off and its floor raised to a base of 50; BTC keeps it.
+ */
+export const AUTO_PASS_CONFIG: Record<Pair, AutoPassRule> = {
+  XAUUSD: { enabled: false, minBase: 50, floor: 60 },
+  BTCUSD: { enabled: true, minBase: 35, floor: 60 },
+};
+
+/** Kept for callers that want the old flat values. */
 export const MOMENTUM_AUTO_PASS = true;
 export const MOMENTUM_MIN_BASE = 35;
 export const AUTO_PASS_FLOOR = 60;
