@@ -136,8 +136,14 @@ export type Outcome = {
   closePrice: number;
   closedAt: string;
   /** How the close was determined. */
-  via: "tp1" | "sl" | "manual";
+  via: "tp1" | "tp2" | "sl" | "manual";
 };
+
+/** Which level a live-price check saw get touched. */
+export type AlertKind = "tp1" | "tp2" | "sl";
+
+/** ISO timestamps of alerts already sent, so a 5-minute poll cannot repeat. */
+export type AlertLog = Partial<Record<AlertKind, string>>;
 
 /** One row of the public history feed. */
 export type TradeRecord = {
@@ -159,6 +165,10 @@ export type TradeRecord = {
   outcome: Outcome | null;
   delivered: boolean;
   mock: boolean;
+  /** Real-time TP/SL alerts already broadcast for this row. */
+  alerts?: AlertLog;
+  /** Best price seen in the trade's favour, for the TP1-then-reverse case. */
+  peak?: number;
 };
 
 export type HistoryFile = {

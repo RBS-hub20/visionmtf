@@ -321,4 +321,71 @@ export async function sendMarketWatch(a: Analysis): Promise<SendResult> {
   return res;
 }
 
+/* ------------------------------------------------------------------ */
+/*  V5.6.8 — real-time TP/SL alerts                                    */
+/* ------------------------------------------------------------------ */
+
+export type OutcomeAlert = {
+  pair: Pair;
+  action: "BUY" | "SELL";
+  kind: "tp1" | "tp2" | "sl";
+  entry: number | null;
+  level: number;
+  price: number;
+  pips: number;
+  tp2?: number | null;
+};
+
+const ALERT_HEAD: Record<OutcomeAlert["kind"], string> = {
+  tp1: "\u{1F3AF} TP1 HIT",
+  tp2: "\u{1F3C6} TP2 HIT",
+  sl: "\u{1F6D1} SL HIT",
+};
+
+export function outcomeAlertText(a: OutcomeAlert): string {
+  const money = (v: number | null) =>
+    v === null || !Number.isFinite(v) ? DASH : formatPrice(a.pair, v);
+  const sign = a.pips >= 0 ? "+" : "";
+  const lines = [
+    `${ALERT_HEAD[a.kind]} - ${a.pair} ${a.action}`,
+    ``,
+    `Entry : ${money(a.entry)}`,
+    `${a.kind === "sl" ? "SL" : a.kind.toUpperCase()}    : ${money(a.level)}`,
+    `Now   : ${money(a.price)}`,
+    ``,
+    `${sign}${a.pips} pips`,
+  ];
+  if (a.kind === "tp1" && a.tp2 != null) {
+    lines.push(``, `Runner open to TP2 ${money(a.tp2)}. Move SL to break-even.`);
+  }
+  if (a.kind === "tp2") lines.push(``, `Full target reached - trade closed.`);
+  if (a.kind === "sl") lines.push(``, `Stopped out - trade closed.`);
+  return lines.join("\n");
+}
+
+/**
+ * Broadcast a TP/SL hit to both channels. Text only: the collage is a
+ * five-timeframe snapshot and would be stale by the time a level is touched,
+ * and these need to arrive within minutes.
+ */
+export async function sendOutcomeAlert(a: OutcomeAlert): Promise<SendResult> {
+  const text = outcomeAlertText(a);
+  const channels: Partial<Record<Channel, ChannelResult>> = {};
+  for (const channel of ["public", "vip"] as Channel[]) {
+    if (channel === "vip" && !chatFor("vip")) {
+      channels.vip = { ok: false, skipped: "not-configured" };
+      continue;
+    }
+    channels[channel] = await postTo(channel, text, null, "");
+  }
+  const deliveredPublic = channels.public?.ok ?? false;
+  const deliveredVip = channels.vip?.ok ?? false;
+  return {
+    ok: deliveredPublic || deliveredVip,
+    channels,
+    deliveredPublic,
+    deliveredVip,
+  };
+}
+
 export { canPostChart, recordChartPost };

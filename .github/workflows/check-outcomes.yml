@@ -1,0 +1,41 @@
+# VISION MTF V5.6.8 — real-time TP/SL alerts.
+#
+# This cannot live in vercel.json: Vercel's Hobby plan rejects any sub-daily
+# cron and fails the WHOLE deployment, not just the schedule. GitHub Actions
+# allows a 5-minute minimum, which is the fastest free option.
+#
+# Scheduled runs are best-effort and can be delayed under load, so treat the
+# cadence as "every few minutes", not a guarantee. The hourly candle-based
+# tracker remains the authoritative settle.
+#
+# Required repo secret: CRON_SECRET (same value as in Vercel).
+
+name: Check outcomes
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: check-outcomes
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Poll /api/cron/check-outcomes
+        env:
+          OUTCOMES_URL: ${{ secrets.OUTCOMES_URL || 'https://visionmtf.vercel.app/api/cron/check-outcomes' }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          code=$(curl -sS -o /tmp/out.json -w '%{http_code}' \
+            --max-time 60 \
+            ${CRON_SECRET:+-H "Authorization: Bearer $CRON_SECRET"} \
+            "$OUTCOMES_URL")
+          echo "HTTP $code"
+          head -c 2000 /tmp/out.json
+          echo
+          test "$code" = "200"
