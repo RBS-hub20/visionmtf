@@ -4,6 +4,7 @@ import { fetchCandles, formatPrice, type Candle, type Spot } from "./market_data
 import {
   AUTO_PASS_CONFIG,
   MOMENTUM_MAX_CONFIDENCE,
+  PAIR_CONFIG,
   detectMomentumWindow,
   momentumLevels,
   type MomentumResult,
@@ -96,9 +97,11 @@ export function applyMomentum(
   //    the threshold, and a floor that lifts them anyway silently cancels it.
   //    That is exactly how the two gold losses were published.
   const rule = AUTO_PASS_CONFIG[analysis.pair];
+  const pairRule = PAIR_CONFIG[analysis.pair];
   const isFade = momentum.detail.exhausted === true;
   const autoPassed =
     rule.enabled &&
+    pairRule.autoPass &&
     !isFade &&
     baseConfidence >= rule.minBase &&
     confidence < rule.floor;

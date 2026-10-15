@@ -3,7 +3,8 @@ import { timingSafeEqual } from "crypto";
 import { readHistory, saveRows, storageBackend } from "@/lib/v5/store";
 import { scanOpenSignals } from "@/lib/v5/live_outcomes";
 import { sendOutcomeAlert, channelsConfigured } from "@/lib/telegram_v5";
-import { getStats } from "@/lib/v5/outcome_tracker";
+import { bestPerformer, getStats } from "@/lib/v5/outcome_tracker";
+import type { AlertStats } from "@/lib/telegram_v5";
 
 /**
  * VISION MTF V5.6.8 — real-time TP/SL alerts.
@@ -50,6 +51,24 @@ async function handle(req: Request) {
   const history = await readHistory();
   const { rows, hits, prices, open } = await scanOpenSignals(history.rows, now);
 
+  // Stats are computed on the UPDATED rows, so a closing hit is already
+  // counted and the alert can say "Updated: 50.0% WR". A TP1 leaves the trade
+  // open, so it correctly reports the unchanged record.
+  const statsAfter = getStats(rows);
+  const best = bestPerformer(rows);
+  const alertStats: AlertStats = {
+    winRate: statsAfter.winRate,
+    wins: statsAfter.wins,
+    losses: statsAfter.losses,
+    breakEven: statsAfter.breakEven,
+    closed: statsAfter.closed,
+    totalPips: statsAfter.totalPips,
+    avgR: statsAfter.avgR,
+    bestPair: best?.pair ?? null,
+    bestWinRate: best?.winRate ?? null,
+    bestSession: best?.bestSession ?? null,
+  };
+
   const delivered: Record<string, unknown>[] = [];
   for (const hit of hits) {
     let res;
@@ -67,7 +86,9 @@ async function handle(req: Request) {
               : (hit.row.tp2 ?? hit.price),
         price: hit.price,
         pips: hit.pips,
+        r: hit.row.outcome?.r ?? null,
         tp2: hit.row.tp2,
+        stats: alertStats,
       });
     } catch (err) {
       // a delivery failure must never block the status write below

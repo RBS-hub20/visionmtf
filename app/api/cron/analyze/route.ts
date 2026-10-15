@@ -25,7 +25,11 @@ import {
   type TradeRecord,
 } from "@/lib/v5/types";
 import { fetchSpot } from "@/lib/v5/market_data";
-import { MOMENTUM_THRESHOLD, type MomentumResult } from "@/lib/v5/momentum";
+import {
+  MOMENTUM_THRESHOLD,
+  PAIR_CONFIG,
+  type MomentumResult,
+} from "@/lib/v5/momentum";
 
 /**
  * VISION MTF V5.6 — analysis cron (dual-channel, anti-spam, outcome tracking).
@@ -187,10 +191,15 @@ async function handle(req: Request) {
       // Momentum entries clear a lower bar (80) than structural ones (85/90):
       // they are early by design and cap out at 88, so the normal threshold
       // would make them almost unreachable.
+      // A BUY can carry its own higher floor: every gold loss so far was a
+      // BUY, so XAUUSD demands minConfForBuy on that side specifically.
       tradable:
         analysis.action !== "WAIT" &&
         analysis.confidence >=
-          (analysis.momentum ? MOMENTUM_THRESHOLD : SEND_THRESHOLD[pair]),
+          Math.max(
+            analysis.momentum ? MOMENTUM_THRESHOLD : SEND_THRESHOLD[pair],
+            analysis.action === "BUY" ? PAIR_CONFIG[pair].minConfForBuy : 0
+          ),
     });
   }
 

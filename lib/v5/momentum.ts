@@ -78,8 +78,50 @@ export type AutoPassRule = {
  * Gold auto-pass is off and its floor raised to a base of 50; BTC keeps it.
  */
 export const AUTO_PASS_CONFIG: Record<Pair, AutoPassRule> = {
-  XAUUSD: { enabled: false, minBase: 50, floor: 60 },
+  XAUUSD: { enabled: false, minBase: 55, floor: 60 },
   BTCUSD: { enabled: true, minBase: 35, floor: 60 },
+};
+
+/**
+ * V5.6.9 — everything that differs per instrument, in one place.
+ *
+ * Live record after 7 settled signals:
+ *   BTCUSD  3W 0L   (100%)
+ *   XAUUSD  0W 4L   (0%)
+ *
+ * BTC's settings are left exactly as they are. Gold is tightened on every
+ * axis: a higher send threshold, a higher base before momentum counts, a
+ * harsher fade penalty, a hard requirement for a break of structure, and a
+ * separate floor for BUYs, which is where all four losses came from.
+ */
+export type PairRule = {
+  sendThreshold: number;
+  momentumMinBase: number;
+  autoPass: boolean;
+  exhaustionPenalty: number;
+  /** No break of structure, no signal. */
+  requireBos: boolean;
+  /** Extra confidence demanded of a BUY specifically. */
+  minConfForBuy: number;
+};
+
+export const PAIR_CONFIG: Record<Pair, PairRule> = {
+  XAUUSD: {
+    sendThreshold: 65,
+    momentumMinBase: 55,
+    autoPass: false,
+    exhaustionPenalty: 30,
+    requireBos: true,
+    minConfForBuy: 70,
+  },
+  BTCUSD: {
+    sendThreshold: 60,
+    momentumMinBase: 35,
+    autoPass: true,
+    exhaustionPenalty: 20,
+    requireBos: true,
+    minConfForBuy: 0,
+  },
 };
 
 /** Kept for callers that want the old flat values. */
@@ -499,6 +541,12 @@ export function detectMomentum(
     return empty({ ...base, gateFailed: "ranging without a double BOS" });
   }
 
+  // requireBos: structure break is mandatory, not merely one trigger among
+  // several. All four gold losses came through without one.
+  if (PAIR_CONFIG[pair].requireBos && !doubleBos && !singleBos) {
+    return empty({ ...base, gateFailed: "no break of structure" });
+  }
+
   // Double BOS is the strong tier (18 base); a single BOS backed by another
   // trigger is the weaker tier (12 base). Compression is context, not a veto:
   // as a hard gate it suppressed every signal in the sample.
@@ -509,7 +557,7 @@ export function detectMomentum(
     (base.choppy4h ? 1 : 0) +
     (base.flatH1 ? 1 : 0) +
     (wick.withVolume ? 2 : 0) -
-    (exhausted ? EXHAUSTION_PENALTY : 0);
+    (exhausted ? PAIR_CONFIG[pair].exhaustionPenalty : 0);
   const score = Math.max(0, Math.min(20, raw));
   if (score <= 0) {
     return empty({ ...base, gateFailed: "score fell to zero after penalties" });

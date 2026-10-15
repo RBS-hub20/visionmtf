@@ -32,8 +32,15 @@ export const TF_WEIGHT: Record<Tf, number> = {
 };
 
 /** Minimum confidence required before a signal is broadcast. */
+/**
+ * Minimum confidence before a structural signal is published.
+ *
+ * V5.6.9 raised gold to 65 after it went 0W 4L live while BTC went 3W 0L.
+ * Mirrors PAIR_CONFIG.sendThreshold in lib/v5/momentum.ts; that file holds
+ * the rest of the per-pair rules.
+ */
 export const SEND_THRESHOLD: Record<Pair, number> = {
-  XAUUSD: 60,
+  XAUUSD: 65,
   BTCUSD: 60,
 };
 

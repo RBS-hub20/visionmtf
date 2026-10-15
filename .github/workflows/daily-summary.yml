@@ -1,0 +1,35 @@
+# VISION MTF V5.6.9 — daily summary at 08:00 Dubai (UTC+4) = 04:00 UTC.
+#
+# Keeps the public channel alive through quiet stretches by posting the
+# rolling record once a day. Public channel only; VIP already gets signals.
+#
+# Not in vercel.json because that file can hold only one daily cron on the
+# Hobby plan and /api/cron/analyze already uses it.
+#
+# Required repo secret: CRON_SECRET (same value as in Vercel).
+
+name: Daily summary
+
+on:
+  schedule:
+    - cron: "0 4 * * *"
+  workflow_dispatch:
+
+jobs:
+  summary:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Post daily summary
+        env:
+          SUMMARY_URL: ${{ secrets.SUMMARY_URL || 'https://visionmtf.vercel.app/api/cron/daily-summary' }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          code=$(curl -sS -o /tmp/out.json -w '%{http_code}' \
+            --max-time 60 \
+            ${CRON_SECRET:+-H "Authorization: Bearer $CRON_SECRET"} \
+            "$SUMMARY_URL")
+          echo "HTTP $code"
+          head -c 2000 /tmp/out.json
+          echo
+          test "$code" = "200"

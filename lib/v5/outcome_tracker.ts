@@ -254,3 +254,66 @@ export function getStats(rows: TradeRecord[], sample = 30): Stats {
     sampleSize: sample,
   };
 }
+
+/* ------------------------------------------------------------------ */
+/*  V5.6.9 — per-pair breakdown for the Telegram stats block           */
+/* ------------------------------------------------------------------ */
+
+export type PairStats = {
+  pair: Pair;
+  wins: number;
+  losses: number;
+  breakEven: number;
+  closed: number;
+  winRate: number;
+  pips: number;
+  bestSession: Session | null;
+};
+
+/** Closed-signal record per pair, newest `sample` first. */
+export function getPairStats(rows: TradeRecord[], sample = 30): PairStats[] {
+  const closed = rows
+    .filter((r) => r.type === "SIGNAL" && r.status !== "PENDING" && r.outcome)
+    .slice(0, sample);
+
+  const pairs = Array.from(new Set(closed.map((r) => r.pair))) as Pair[];
+  return pairs
+    .map((pair) => {
+      const mine = closed.filter((r) => r.pair === pair);
+      const wins = mine.filter((r) => r.status === "WIN").length;
+      const losses = mine.filter((r) => r.status === "LOSS").length;
+      const breakEven = mine.filter((r) => r.status === "BE").length;
+
+      // strongest session for this pair, by summed pips
+      const bySession = new Map<Session, number>();
+      for (const r of mine) {
+        bySession.set(r.session, (bySession.get(r.session) ?? 0) + (r.outcome?.pips ?? 0));
+      }
+      let bestSession: Session | null = null;
+      let best = -Infinity;
+      bySession.forEach((v, k) => {
+        if (v > best) {
+          best = v;
+          bestSession = k;
+        }
+      });
+
+      return {
+        pair,
+        wins,
+        losses,
+        breakEven,
+        closed: mine.length,
+        winRate: mine.length ? Math.round((wins / mine.length) * 1000) / 10 : 0,
+        pips: Math.round(mine.reduce((s, r) => s + (r.outcome?.pips ?? 0), 0) * 10) / 10,
+        bestSession: best > 0 ? bestSession : null,
+      };
+    })
+    .sort((a, b) => b.winRate - a.winRate || b.pips - a.pips);
+}
+
+/** The pair to headline as "Best" — highest win rate, then most pips. */
+export function bestPerformer(rows: TradeRecord[], sample = 30): PairStats | null {
+  const all = getPairStats(rows, sample).filter((p) => p.closed > 0);
+  return all.length ? all[0] : null;
+}

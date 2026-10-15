@@ -325,6 +325,19 @@ export async function sendMarketWatch(a: Analysis): Promise<SendResult> {
 /*  V5.6.8 — real-time TP/SL alerts                                    */
 /* ------------------------------------------------------------------ */
 
+export type AlertStats = {
+  winRate: number;
+  wins: number;
+  losses: number;
+  breakEven: number;
+  closed: number;
+  totalPips: number;
+  avgR: number;
+  bestPair: string | null;
+  bestWinRate: number | null;
+  bestSession: string | null;
+};
+
 export type OutcomeAlert = {
   pair: Pair;
   action: "BUY" | "SELL";
@@ -333,8 +346,33 @@ export type OutcomeAlert = {
   level: number;
   price: number;
   pips: number;
+  /** Realised R, shown on a closing hit. */
+  r?: number | null;
   tp2?: number | null;
+  stats?: AlertStats | null;
 };
+
+export const LIVE_URL = "visionmtf.vercel.app/live";
+
+/** "42.9% WR (3W 4L) | +2326.3 pips | +0.29R avg" plus the best-pair line. */
+export function statsBlock(stats: AlertStats | null | undefined, updated: boolean): string[] {
+  if (!stats || stats.closed === 0) return [];
+  const sign = (n: number) => (n >= 0 ? "+" : "");
+  const record =
+    `${stats.wins}W ${stats.losses}L` + (stats.breakEven ? ` ${stats.breakEven}BE` : "");
+  const lines = [
+    ``,
+    `\u{1F4CA} ${updated ? "Updated" : "Stats"}: ${stats.winRate}% WR (${record}) | ` +
+      `${sign(stats.totalPips)}${stats.totalPips} pips | ${sign(stats.avgR)}${stats.avgR}R avg`,
+  ];
+  if (stats.bestPair) {
+    const wr = stats.bestWinRate !== null ? ` (${stats.bestWinRate}% WR)` : "";
+    const ses = stats.bestSession ? ` - ${stats.bestSession} session` : "";
+    lines.push(`\u{1F3C6} Best: ${stats.bestPair}${wr}${ses}`);
+  }
+  lines.push(``, LIVE_URL);
+  return lines;
+}
 
 const ALERT_HEAD: Record<OutcomeAlert["kind"], string> = {
   tp1: "\u{1F3AF} TP1 HIT",
@@ -346,20 +384,35 @@ export function outcomeAlertText(a: OutcomeAlert): string {
   const money = (v: number | null) =>
     v === null || !Number.isFinite(v) ? DASH : formatPrice(a.pair, v);
   const sign = a.pips >= 0 ? "+" : "";
+  const closing = a.kind !== "tp1";
+  const rSuffix =
+    a.r !== undefined && a.r !== null && Number.isFinite(a.r)
+      ? ` (${a.r >= 0 ? "+" : ""}${a.r}R)`
+      : "";
+
+  const head =
+    a.kind === "tp1"
+      ? `${ALERT_HEAD.tp1} - ${a.pair} ${a.action}`
+      : a.kind === "tp2"
+        ? `${ALERT_HEAD.tp2} - ${a.pair} ${a.action} - WIN CLOSED`
+        : `${ALERT_HEAD.sl} - ${a.pair} ${a.action}`;
+
   const lines = [
-    `${ALERT_HEAD[a.kind]} - ${a.pair} ${a.action}`,
+    head,
     ``,
     `Entry : ${money(a.entry)}`,
-    `${a.kind === "sl" ? "SL" : a.kind.toUpperCase()}    : ${money(a.level)}`,
-    `Now   : ${money(a.price)}`,
-    ``,
-    `${sign}${a.pips} pips`,
+    `${a.kind === "sl" ? "SL   " : a.kind.toUpperCase() + "  "} : ${money(a.level)}`,
   ];
+  if (a.kind !== "sl") lines.push(`Now   : ${money(a.price)}`);
+  lines.push(``, `${sign}${a.pips} pips${rSuffix}`);
+
   if (a.kind === "tp1" && a.tp2 != null) {
-    lines.push(``, `Runner open to TP2 ${money(a.tp2)}. Move SL to break-even.`);
+    lines.push(``, `Runner open to TP2 ${money(a.tp2)}. Move SL to BE.`);
   }
   if (a.kind === "tp2") lines.push(``, `Full target reached - trade closed.`);
-  if (a.kind === "sl") lines.push(``, `Stopped out - trade closed.`);
+  if (a.kind === "sl") lines.push(``, `Trade closed.`);
+
+  lines.push(...statsBlock(a.stats, closing));
   return lines.join("\n");
 }
 
@@ -385,6 +438,55 @@ export async function sendOutcomeAlert(a: OutcomeAlert): Promise<SendResult> {
     channels,
     deliveredPublic,
     deliveredVip,
+  };
+}
+
+/**
+ * Daily summary, so the channel is never silent for a full day.
+ * Public channel only — VIP already gets every signal.
+ */
+export async function sendDailySummary(opts: {
+  stats: AlertStats;
+  signalsLast24h: number;
+  rowsScanned: number;
+  targetWinRate?: number;
+}): Promise<SendResult> {
+  const { stats, signalsLast24h, rowsScanned } = opts;
+  const target = opts.targetWinRate ?? 60;
+  const sign = (n: number) => (n >= 0 ? "+" : "");
+  const record =
+    `${stats.wins}W ${stats.losses}L` + (stats.breakEven ? ` ${stats.breakEven}BE` : "");
+
+  const lines = [
+    `\u{1F4CA} VISION MTF - Daily Summary`,
+    ``,
+    `Last ${stats.closed} closed: ${record}`,
+    `Win Rate: ${stats.winRate}%  ->  target ${target}%+`,
+    `Total: ${sign(stats.totalPips)}${stats.totalPips} pips (${sign(stats.avgR)}${stats.avgR}R avg)`,
+  ];
+  if (stats.bestPair) {
+    const wr = stats.bestWinRate !== null ? ` ${stats.bestWinRate}% WR` : "";
+    const ses = stats.bestSession ? ` (${stats.bestSession})` : "";
+    lines.push(`Best: ${stats.bestPair}${wr}${ses}`);
+  }
+  lines.push(
+    ``,
+    signalsLast24h === 0
+      ? `No signals in the last 24h - market on watch. ${rowsScanned} rows scanned.`
+      : `${signalsLast24h} signal${signalsLast24h === 1 ? "" : "s"} in the last 24h. ${rowsScanned} rows scanned.`,
+    ``,
+    LIVE_URL
+  );
+
+  const text = lines.join("\n");
+  const channels: Partial<Record<Channel, ChannelResult>> = {
+    public: await postTo("public", text, null, ""),
+  };
+  return {
+    ok: channels.public?.ok ?? false,
+    channels,
+    deliveredPublic: channels.public?.ok ?? false,
+    deliveredVip: false,
   };
 }
 
